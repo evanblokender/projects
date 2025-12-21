@@ -1,0 +1,47 @@
+<!doctype html> //ima try to make it easy to understand
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <link rel="stylesheet" href="style.css" />
+  <title>imdBeatsaber</title>
+</head>
+<body>
+  <div id="app">
+    <div class="topbar">
+      <div class="search">
+        <input id="searchInput" placeholder="Search BeatSaver maps..." autocomplete="off" />
+        <button id="searchBtn" aria-label="Search">🔍</button>
+      </div>
+      <div class="recommended-pill">Recommended</div>
+    </div>
+
+    <div id="recommended" class="recommended"></div>
+
+    <div id="results" class="results"></div>
+  </div>
+
+  <div id="modal" class="modal hidden" role="dialog" aria-modal="true">
+    <div class="modal-card">
+      <button class="close-btn" id="closeModal">✕</button>
+      <div class="modal-content">
+        <img id="modalCover" class="cover" alt="cover" />
+        <div class="meta">
+          <h2 id="modalTitle"></h2>
+          <div id="modalAuthor" class="author"></div>
+          <div id="modalStars" class="stars"></div>
+          <div id="modalVotes" class="votes"></div>
+          <div class="mods-row"><strong>Mods required:</strong> <span id="modalMods"></span></div>
+          <p id="modalDesc" class="desc"></p>
+          <div class="modal-actions">
+            <a id="beatsaverLink" class="bs-link" target="_blank" rel="noopener">Open on BeatSaver</a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
+
