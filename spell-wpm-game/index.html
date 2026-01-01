@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Single Word Sprint</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="app">
+        <header>
+            <div class="stats-bar">
+                <div class="stat">
+                    <span class="label">Last WPM</span>
+                    <span id="last-wpm" class="value">0</span>
+                </div>
+                <div class="stat">
+                    <span class="label">Best</span>
+                    <span id="best-wpm" class="value">0</span>
+                </div>
+
+            </div>
+
+            <!-- Settings panel (top-left) -->
+            <div id="settings-panel" class="settings-panel">
+                <button id="settings-toggle" class="settings-toggle" aria-expanded="false">⚙</button>
+                <div id="settings-body" class="settings-body" hidden>
+                    <div class="settings-row">
+                        <label for="volume-slider">Volume</label>
+                        <input id="volume-slider" type="range" min="0" max="1" step="0.01">
+                    </div>
+                    <div class="settings-row">
+                        <label for="bg-slider">Background</label>
+                        <input id="bg-slider" type="range" min="0" max="1" step="0.01">
+                    </div>
+                    <div class="settings-row">
+                        <label for="theme-toggle">Theme</label>
+                        <button id="theme-toggle" class="theme-toggle">Light</button>
+                    </div>
+                    <div class="settings-row">
+                        <label for="auto-submit-checkbox">Auto-submit scores</label>
+                        <input id="auto-submit-checkbox" type="checkbox" aria-label="Auto submit every score to leaderboard">
+                    </div>
+                    <div class="settings-row">
+                        <label for="auto-next-checkbox">Auto-next (skip result)</label>
+                        <input id="auto-next-checkbox" type="checkbox" aria-label="Automatically start next word after success">
+                    </div>
+                </div>
+            </div>
+
+
+        </header>
+
+        <main>
+            <div id="word-display-container">
+                <div id="word-display">
+                    <!-- Target word with spans for characters will be injected here -->
+                </div>
+
+                <!-- Timed stat moved closer to the word -->
+                <div id="timed-stat" style="display:none;">
+                    <div class="timed-label">Time Left</div>
+                    <div id="timed-remaining" class="timed-value">0.00s</div>
+                </div>
+            </div>
+
+            <div class="input-wrapper">
+                <input type="text" id="type-input" autocomplete="off" autofocus placeholder="Type here...">
+                <div class="focus-notice">Click to focus</div>
+            </div>
+
+            <div id="results-overlay" class="hidden">
+                <div class="result-card">
+                    <h2 id="result-title">Great!</h2>
+                    <div class="result-stats">
+                        <div class="res-stat">
+                            <span class="res-val" id="res-wpm">0</span>
+                            <span class="res-lab">WPM</span>
+                        </div>
+                        <div class="res-stat">
+                            <span class="res-val" id="res-time">0.00s</span>
+                            <span class="res-lab">Time</span>
+                        </div>
+                    </div>
+                    <div style="display:flex;gap:10px;margin-top:10px;">
+                        <button id="submit-wpm-btn" style="flex:1;background:#4caf50;color:#000;padding:12px;border-radius:10px;border:none;cursor:pointer;">Submit WPM</button>
+                    </div>
+                    <button id="next-btn" style="margin-top:12px;">Next Word</button>
+                </div>
+            </div>
+        </main>
+
+        <footer>
+            <button id="replay-audio-btn" class="secondary-btn hidden">🔊</button>
+            <button id="change-word-btn" class="secondary-btn">Random</button>
+            <button id="custom-word-btn" class="secondary-btn">Custom</button>
+            <button id="toggle-difficulty" class="secondary-btn">Mode: Normal</button>
+            <button id="toggle-spelling-bee" class="secondary-btn">Spelling Bee: OFF</button>
+            <button id="toggle-corrections" class="secondary-btn hidden">Corrections: OFF</button>
+            <button id="reveal-word-btn" class="secondary-btn hidden">Reveal Word</button>
+            <!-- Multiplayer removed -->
+            <button id="toggle-timed" class="secondary-btn">Timed: OFF</button>
+        </footer>
+
+        <div id="custom-overlay" class="hidden">
+            <div class="result-card">
+                <h2>Custom Word</h2>
+                <input type="text" id="custom-word-input" placeholder="Type word..." autocomplete="off">
+                <div class="modal-btns">
+                    <button id="set-custom-btn">Start</button>
+                    <button id="cancel-custom-btn" class="cancel-btn">Cancel</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script type="importmap">
+    {
+        "imports": {
+            "words": "./words.js"
+        }
+    }
+    </script>
+    <script type="module" src="app.js"></script>
+</body>
+</html>
