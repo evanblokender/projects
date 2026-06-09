@@ -86,9 +86,9 @@ const elements = {
     toast: $("toast")
 };
 
-const modes = ["Easy", "Normal", "Hard", "Super Hard", "Insane", "Crazy", "Master", "Impossible"];
+const modes = ["Easy", "Wet", "Normal", "Hard", "Super Hard", "Insane", "Crazy", "Master", "Impossible"];
 const state = {
-    modeIndex: 1,
+    modeIndex: 2,
     word: "",
     startedAt: 0,
     finished: false,
@@ -101,7 +101,7 @@ const state = {
     bestWpm: Number(localStorage.getItem("bestWordWpm") || 0),
     volume: Number(localStorage.getItem("masterVolume") || 0.12),
     autoNext: localStorage.getItem("autoNext") === "true",
-    apiUrl: normalizeApiUrl(localStorage.getItem("spellrushApiUrl") || "http://localhost:3000"),
+    apiUrl: normalizeApiUrl(localStorage.getItem("spellrushApiUrl") || "https://type-backend-production-509b.up.railway.app"),
     token: localStorage.getItem("spellrushToken") || "",
     user: readJson("spellrushUser"),
     authMode: "login",
@@ -191,7 +191,7 @@ function speakWord(word) {
 }
 
 function getTimeLimit() {
-    const limits = [7500, 9000, 10500, 12500, 14500, 16500, 26000, 150000];
+    const limits = [7500, 5000, 9000, 10500, 12500, 14500, 16500, 26000, 150000];
     return limits[state.modeIndex];
 }
 
@@ -269,6 +269,7 @@ function initSolo(customWord = "") {
     state.finished = false;
     elements.typeInput.value = "";
     elements.typeInput.disabled = false;
+    elements.typeInput.readOnly = false;
     elements.roundKicker.textContent = customWord ? "Custom practice" : `${modes[state.modeIndex]} difficulty`;
     renderCharacters(elements.wordDisplay, state.word, "", state.spellingBee);
     elements.replayAudioBtn.classList.toggle("hidden", !state.spellingBee);
@@ -279,13 +280,21 @@ function initSolo(customWord = "") {
     setTimeout(() => elements.typeInput.focus(), 20);
 }
 
+function advanceSolo() {
+    hideModal(elements.resultsModal);
+    initSolo();
+}
+
 function calculateWpm(word, duration) {
     return (word.length / 5) / (duration / 60000);
 }
 
 function finishSolo() {
+    if (state.finished) {
+        return;
+    }
     state.finished = true;
-    elements.typeInput.disabled = true;
+    elements.typeInput.readOnly = true;
     stopSoloTimer();
     const duration = Math.max(80, performance.now() - state.startedAt);
     const wpm = calculateWpm(state.word, duration);
@@ -305,10 +314,17 @@ function finishSolo() {
     elements.resultTitle.textContent = state.streak >= 5 ? `${state.streak} word streak` : "Clean finish";
     playSound(880, "sine", 0.18, 0.12);
     setTimeout(() => playSound(1320, "sine", 0.22, 0.08), 90);
+    showToast(`Word completed | ${Math.round(wpm)} WPM`);
     if (state.autoNext) {
         setTimeout(initSolo, 650);
     } else {
         showModal(elements.resultsModal);
+    }
+}
+
+function verifySoloCompletion() {
+    if (!state.finished && elements.typeInput.value === state.word) {
+        finishSolo();
     }
 }
 
@@ -332,9 +348,8 @@ function handleSoloInput(event) {
     if (event.inputType !== "deleteContentBackward") {
         playSound(390 + Math.min(300, elements.typeInput.value.length * 14), "square", 0.035, 0.035);
     }
-    if (elements.typeInput.value === state.word) {
-        finishSolo();
-    }
+    verifySoloCompletion();
+    queueMicrotask(verifySoloCompletion);
 }
 
 function updateAccountUi() {
@@ -689,6 +704,7 @@ elements.contrastCheckbox.addEventListener("change", () => {
     localStorage.setItem("highContrast", String(elements.contrastCheckbox.checked));
 });
 elements.typeInput.addEventListener("input", handleSoloInput);
+elements.typeInput.addEventListener("keyup", verifySoloCompletion);
 elements.typeInput.addEventListener("paste", (event) => event.preventDefault());
 elements.typeInput.addEventListener("drop", (event) => event.preventDefault());
 elements.typeInput.addEventListener("contextmenu", (event) => event.preventDefault());
@@ -697,8 +713,7 @@ elements.matchInput.addEventListener("paste", (event) => event.preventDefault())
 elements.matchInput.addEventListener("drop", (event) => event.preventDefault());
 elements.randomBtn.addEventListener("click", () => initSolo());
 elements.nextBtn.addEventListener("click", () => {
-    hideModal(elements.resultsModal);
-    initSolo();
+    advanceSolo();
 });
 elements.difficultyBtn.addEventListener("click", () => {
     state.modeIndex = (state.modeIndex + 1) % modes.length;
@@ -771,8 +786,15 @@ document.addEventListener("click", (event) => {
     }
 });
 document.addEventListener("keydown", (event) => {
-    if (event.key === "Enter" && !elements.resultsModal.classList.contains("hidden")) {
-        elements.nextBtn.click();
+    if (event.key === "Enter") {
+        const activeModal = event.target.closest?.(".modal:not(.hidden)");
+        const typingInForm = event.target.matches?.("#auth-username, #auth-password, #custom-word-input, #join-code-input, #room-name-input, #api-url-input");
+        if (state.finished && !typingInForm && (!activeModal || activeModal === elements.resultsModal)) {
+            event.preventDefault();
+            event.stopPropagation();
+            advanceSolo();
+            return;
+        }
     }
     if (event.key === "Escape") {
         document.querySelectorAll(".modal:not(.hidden)").forEach(hideModal);

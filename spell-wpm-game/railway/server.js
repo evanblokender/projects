@@ -38,10 +38,13 @@ const corsOrigin = (origin, callback) => {
     callback(new Error("Origin not allowed."));
 };
 
+const databaseHost = new URL(databaseUrl).hostname;
+const usesPrivateDatabase = databaseHost === "localhost" || databaseHost.endsWith(".railway.internal");
 const pool = new Pool({
     connectionString: databaseUrl,
-    ssl: databaseUrl.includes("localhost") ? false : { rejectUnauthorized: false },
-    max: 10
+    ssl: usesPrivateDatabase ? false : { rejectUnauthorized: false },
+    max: 10,
+    connectionTimeoutMillis: 10000
 });
 
 const app = express();
@@ -114,6 +117,21 @@ async function initializeDatabase() {
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
     `);
+}
+
+async function initializeDatabaseWithRetry() {
+    let lastError;
+    for (let attempt = 1; attempt <= 12; attempt += 1) {
+        try {
+            await initializeDatabase();
+            return;
+        } catch (error) {
+            lastError = error;
+            console.error(`Database connection attempt ${attempt} failed.`);
+            await new Promise((resolve) => setTimeout(resolve, 5000));
+        }
+    }
+    throw lastError;
 }
 
 function publicUser(row) {
@@ -590,7 +608,7 @@ io.on("connection", (socket) => {
     socket.on("disconnect", () => leaveCurrentRoom(socket, false));
 });
 
-await initializeDatabase();
+await initializeDatabaseWithRetry();
 server.listen(port, "0.0.0.0", () => {
     console.log(`SpellRush server listening on port ${port}`);
 });

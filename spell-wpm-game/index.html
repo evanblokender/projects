@@ -5,21 +5,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="#080b14">
     <title>SpellRush Arena</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <div class="ambient ambient-one"></div>
-    <div class="ambient ambient-two"></div>
     <div id="app">
         <header class="topbar">
             <button class="brand" id="brand-home" type="button">
-                <span class="brand-mark">S</span>
+                <span class="brand-mark">sr</span>
                 <span>
-                    <strong>SpellRush</strong>
-                    <small>typing arena</small>
+                    <strong>spellrush</strong>
                 </span>
             </button>
             <nav class="nav-actions">
@@ -62,7 +56,7 @@
             </label>
             <label class="setting-stack">
                 <span>Railway API URL</span>
-                <input id="api-url-input" type="url" placeholder="https://your-app.up.railway.app">
+                <input id="api-url-input" type="url" placeholder="type-backend-production-509b.up.railway.app">
             </label>
             <button id="save-api-btn" class="secondary full" type="button">Save server connection</button>
             <div id="server-status" class="server-status">Not connected</div>
@@ -71,9 +65,9 @@
         <main>
             <section id="solo-view" class="view active">
                 <div class="hero-copy">
-                    <span class="eyebrow">Train your reaction speed</span>
-                    <h1>One word. <em>Full focus.</em></h1>
-                    <p>Build a streak, chase a personal best, then take your speed into the live arena.</p>
+                    <span class="eyebrow">Solo practice</span>
+                    <h1>Type fast. Spell it right.</h1>
+                    <p>Practice one word at a time or race other players in the arena.</p>
                 </div>
 
                 <div class="game-layout">
@@ -88,7 +82,7 @@
                         </div>
 
                         <div class="word-zone">
-                            <div id="round-kicker" class="round-kicker">Ready when you are</div>
+                            <div id="round-kicker" class="round-kicker">Normal difficulty</div>
                             <div id="word-display" class="word-display"></div>
                             <button id="replay-audio-btn" class="listen-btn hidden" type="button">Listen again</button>
                             <div id="timer-wrap" class="timer-wrap hidden">
@@ -115,10 +109,9 @@
                     </section>
 
                     <aside class="challenge-card">
-                        <div class="challenge-icon">⌁</div>
-                        <span class="eyebrow">Daily challenge</span>
-                        <h2>Precision run</h2>
-                        <p>Complete ten words without a mistake. Every clean word raises your multiplier.</p>
+                        <span class="eyebrow">Session goal</span>
+                        <h2>10 clean words</h2>
+                        <p>Finish ten words in a row. A timeout resets the counter.</p>
                         <div class="challenge-progress">
                             <span><b id="challenge-count">0</b> / 10 words</span>
                             <span id="challenge-label">0%</span>
@@ -133,9 +126,9 @@
                 <div id="arena-home">
                     <div class="arena-hero">
                         <div>
-                            <span class="eyebrow">Live multiplayer</span>
-                            <h1>Race the room.</h1>
-                            <p>Everyone gets the same words. Reach 12 first or lead the board when 90 seconds runs out.</p>
+                            <span class="eyebrow">Multiplayer</span>
+                            <h1>Live races</h1>
+                            <p>Same words, same clock. First to 12 wins.</p>
                         </div>
                         <button id="quick-play-btn" class="primary large" type="button">Quick play</button>
                     </div>
