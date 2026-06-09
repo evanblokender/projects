@@ -9,8 +9,6 @@ export const easyWords = [
     "fork", "spoon", "plate", "bowl", "chair", "bed", "ball", "bat", "ship", "boat",
     "car", "bus", "bike", "plane", "train", "gold", "silver", "iron", "rock", "sand",
     "dirt", "leaf", "root", "seed", "rose", "lily", "bell", "drum", "flag", "star",
-    // +50 additional easy/common words
-  // used chatgpt to make this, too lazy to write all this down
     "milkman", "candy", "pillow", "blanket", "button", "window", "mirror", "clock", "cookie", "shadow",
     "ribbon", "puzzle", "garden", "butter", "cheese", "cookie", "breeze", "candle", "needle", "thread",
     "pocket", "ticket", "magnet", "bagel", "camera", "basket", "helmet", "wallet", "socks", "jacket",
@@ -41,7 +39,6 @@ export const normalWords = [
     "preparation", "presentation", "recognition", "reflection", "satisfaction",
     "traditional", "fundamental", "substantial", "artificial", "intelligence",
     "blockchain", "cryptography", "distributed", "decentralized", "observation",
-    // +50 additional normal-mode words
     "synthesis", "modular", "concurrency", "throughput", "latency", "bandwidth", "middleware",
     "orchestration", "provisioning", "benchmark", "refactor", "backpressure", "idempotent",
     "serialization", "deserialization", "heuristic", "annotation", "immutable", "convention",
@@ -68,7 +65,6 @@ export const hardWords = [
     "discipline", "efficient", "eighth", "eligible", "eliminate", "embarrass", "eminent", "emphasize", 
     "endeavor", "enthusiasm", "entrepreneur", "environment", "equipped", "equivalent", "especially", "exaggerate",
     "existence", "experience", "explanation", "familiar", "foreign", "forty", "fourth", "government", "grammar", "guarantee",
-    // +50 additional hard words
     "hierarchy", "idiosyncrasy", "illusory", "impeccable", "impetus", "incendiary", "incredulous", "indignation", "inevitable", "infallible",
     "infrastructure", "inscrutable", "insidious", "instigate", "intangible", "intellectual", "intermittent", "introspection", "irrelevant", "juxtapose",
     "legitimate", "leniency", "lethargy", "levitation", "lucidity", "magnify", "malevolent", "mendacity", "meticulous", "mitigate",
@@ -88,7 +84,6 @@ export const superHardWords = [
     "obdurate", "obfuscate", "obsequious", "obstreperous", "officious", "ostentatious", "palliate", "panacea", "paradigmatic", "pariah",
     "paucity", "pejorative", "pellucid", "penury", "perfidious", "perfunctory", "pernicious", "perspicacious", "phlegmatic", "platitude",
     "plethora", "polemic", "precocious", "prescient", "probity", "proclivity", "promulgate", "propensity", "puerile", "pugnacious",
-    // +50 additional super-hard words
     "quiescent", "recalcitrant", "redolent", "sagacious", "salubrious", "sanguine", "solipsism", "spurious", "strident", "subservient",
     "suffrage", "supercilious", "sycophant", "taciturn", "tantamount", "tempestuous", "terse", "torpor", "transient", "trenchant",
     "ubiquitous", "unctuous", "vacillate", "venerable", "verbose", "vicarious", "vicissitude", "vindicate", "virtuoso", "viscous",
@@ -107,7 +102,6 @@ export const insaneWords = [
     "malarkey", "mammothuptich", "metathesis", "miscreant", "mountebank", "namby-pamby", "nincompoop", "obnubilate", "onomatopoeia", "opsimath",
     "palaver", "panjandrum", "paraphernalia", "pastiche", "peradventure", "persnickety", "pettifogger", "philistine", "phyllotaxy", "pizzicato",
     "pleonasm", "polyglot", "prestidigitation", "propinquity", "qualtagh", "quarrelsome", "quiddity", "quixotic", "ragamuffin", "rapscallion",
-    // +50 additional insane-mode words
     "raspberry", "recherché", "recumbent", "refulgent", "regicide", "reminisce", "repercussion", "rigmarole", "risible", "rodomontade",
     "rumination", "saccade", "sacrilege", "samaritan", "sandpaper", "sanguinary", "saturnine", "scintilla", "scrofulous", "serendipity",
     "sesquipedalian", "simulacrum", "skulduggery", "slapdash", "sobriquet", "somnambulist", "spectacle", "spelunker", "spuriousness", "stalwart",
@@ -126,7 +120,6 @@ export const crazyWords = [
     "anthropomorphize", "chorioallantoic", "encephalomyelitis", "hyperparathyroidism", "subterranean", "electroretinogram", "microangiopathy",
     "chromatographically", "ultracentrifugation", "phosphatidylethanolamine", "lymphadenopathy", "pachydermatous", "sphygmomanometer",
     "electrocardiographically", "magnetoencephalography",
-    // +50 additional crazy-mode words
     "otorhinolaryngologist", "ultramicroscopy", "thermodynamics", "thermochemistry", "spectrophotometer", "radiotelemetry", "psychophysiology", "neurochemistry", "neuropsychology", "microelectrode",
     "macrocephalus", "lithotripsy", "keratinocyte", "immunodeficiency", "heterozygosity", "gastroenterology", "gastrointestinal", "electrophoresis", "electrostatics", "ectothermic",
     "dysfunctional", "crystallography", "chronobiology", "chemotherapeutic", "carboxylation", "calcitonin", "bronchoscopy", "biotransformation", "bioavailability", "bibliography",
@@ -249,7 +242,6 @@ export const longWords = [
     "hexakosioihexekontahexaphobia",
     "donaudampfschifffahrtselektrizitatenhauptbetriebswerkbauunterbeamtengesellschaft",
     "duadecodunoscopy",
-    // +50 additional very long/master words
     "electroencephalographically", "psychoneuroimmunological", "microphotographic", "neuroendocrinological", "spectrophotofluorometrical",
     "immunohistochemically", "radiopharmaceuticals", "ultracentrifugational", "chromatographically", "microangiopathies",
     "gastroenterological", "cardiothoracic", "bronchopulmonary", "rhinolaryngological", "otorhinolaryngological", "ophthalmological",
@@ -278,7 +270,6 @@ export const impossibleWords = [
     "Krungthepmahanakhonamonrattanakosinmahintharayuthayamahadilokphophnoppharatratchathaniburiromudomratchaniwetmahasathanamonpimanawatansathitsakkathattiyawitsanukamprasit",
     "Tweedehandsemotorverkoopsmannevakbondstakingsvergaderingsameroeperstoespraakskrywerspersverklaringuitreikingsmediakonferensieaankondiging",
     "Nalunaarasuartaateeraaranngualioiligeullioqiliffissualioriataallaqqissupilorujussuanngortartuinnakasinngortinniamisaalinnguatsiaraluallaqqooqigaminngamiaasiinngooq",
-    // +5 additional impossible entries
     "pseudopseudohypoparathyroidism",
     "floccinaucinihilipilification",
     "antidisestablishmentarianism",

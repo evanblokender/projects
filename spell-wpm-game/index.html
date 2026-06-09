@@ -2,125 +2,286 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Single Word Sprint</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#080b14">
+    <title>SpellRush Arena</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
+    <div class="ambient ambient-one"></div>
+    <div class="ambient ambient-two"></div>
     <div id="app">
-        <header>
-            <div class="stats-bar">
-                <div class="stat">
-                    <span class="label">Last WPM</span>
-                    <span id="last-wpm" class="value">0</span>
+        <header class="topbar">
+            <button class="brand" id="brand-home" type="button">
+                <span class="brand-mark">S</span>
+                <span>
+                    <strong>SpellRush</strong>
+                    <small>typing arena</small>
+                </span>
+            </button>
+            <nav class="nav-actions">
+                <button id="solo-nav" class="nav-btn active" type="button">Solo</button>
+                <button id="arena-nav" class="nav-btn" type="button">
+                    Arena
+                    <span class="live-dot"></span>
+                </button>
+            </nav>
+            <div class="account-area">
+                <div id="account-chip" class="account-chip hidden">
+                    <span id="account-avatar" class="account-avatar">P</span>
+                    <span id="account-name">Player</span>
+                    <button id="logout-btn" class="icon-btn" type="button" aria-label="Log out">×</button>
                 </div>
-                <div class="stat">
-                    <span class="label">Best</span>
-                    <span id="best-wpm" class="value">0</span>
-                </div>
-
+                <button id="account-btn" class="primary compact" type="button">Sign in</button>
+                <button id="settings-toggle" class="icon-btn settings-trigger" type="button" aria-label="Settings">⚙</button>
             </div>
-
-            <!-- Settings panel (top-left) -->
-            <div id="settings-panel" class="settings-panel">
-                <button id="settings-toggle" class="settings-toggle" aria-expanded="false">⚙</button>
-                <div id="settings-body" class="settings-body" hidden>
-                    <div class="settings-row">
-                        <label for="volume-slider">Volume</label>
-                        <input id="volume-slider" type="range" min="0" max="1" step="0.01">
-                    </div>
-                    <div class="settings-row">
-                        <label for="bg-slider">Background</label>
-                        <input id="bg-slider" type="range" min="0" max="1" step="0.01">
-                    </div>
-                    <div class="settings-row">
-                        <label for="theme-toggle">Theme</label>
-                        <button id="theme-toggle" class="theme-toggle">Light</button>
-                    </div>
-                    <div class="settings-row">
-                        <label for="auto-submit-checkbox">Auto-submit scores</label>
-                        <input id="auto-submit-checkbox" type="checkbox" aria-label="Auto submit every score to leaderboard">
-                    </div>
-                    <div class="settings-row">
-                        <label for="auto-next-checkbox">Auto-next (skip result)</label>
-                        <input id="auto-next-checkbox" type="checkbox" aria-label="Automatically start next word after success">
-                    </div>
-                </div>
-            </div>
-
-
         </header>
 
+        <aside id="settings-panel" class="settings-panel hidden">
+            <div class="panel-heading">
+                <div>
+                    <span class="eyebrow">Preferences</span>
+                    <h3>Game settings</h3>
+                </div>
+                <button id="settings-close" class="icon-btn" type="button">×</button>
+            </div>
+            <label class="setting-row">
+                <span>Sound volume</span>
+                <input id="volume-slider" type="range" min="0" max="1" step="0.01">
+            </label>
+            <label class="setting-row">
+                <span>Auto next word</span>
+                <input id="auto-next-checkbox" type="checkbox">
+            </label>
+            <label class="setting-row">
+                <span>High contrast</span>
+                <input id="contrast-checkbox" type="checkbox">
+            </label>
+            <label class="setting-stack">
+                <span>Railway API URL</span>
+                <input id="api-url-input" type="url" placeholder="https://your-app.up.railway.app">
+            </label>
+            <button id="save-api-btn" class="secondary full" type="button">Save server connection</button>
+            <div id="server-status" class="server-status">Not connected</div>
+        </aside>
+
         <main>
-            <div id="word-display-container">
-                <div id="word-display">
-                    <!-- Target word with spans for characters will be injected here -->
+            <section id="solo-view" class="view active">
+                <div class="hero-copy">
+                    <span class="eyebrow">Train your reaction speed</span>
+                    <h1>One word. <em>Full focus.</em></h1>
+                    <p>Build a streak, chase a personal best, then take your speed into the live arena.</p>
                 </div>
 
-                <!-- Timed stat moved closer to the word -->
-                <div id="timed-stat" style="display:none;">
-                    <div class="timed-label">Time Left</div>
-                    <div id="timed-remaining" class="timed-value">0.00s</div>
-                </div>
-            </div>
-
-            <div class="input-wrapper">
-                <input type="text" id="type-input" autocomplete="off" autofocus placeholder="Type here...">
-                <div class="focus-notice">Click to focus</div>
-            </div>
-
-            <div id="results-overlay" class="hidden">
-                <div class="result-card">
-                    <h2 id="result-title">Great!</h2>
-                    <div class="result-stats">
-                        <div class="res-stat">
-                            <span class="res-val" id="res-wpm">0</span>
-                            <span class="res-lab">WPM</span>
+                <div class="game-layout">
+                    <section class="game-card">
+                        <div class="game-card-top">
+                            <div class="mode-pills">
+                                <button id="difficulty-btn" class="pill active" type="button">Normal</button>
+                                <button id="timed-btn" class="pill" type="button">Relaxed</button>
+                                <button id="bee-btn" class="pill" type="button">Visible word</button>
+                            </div>
+                            <button id="random-btn" class="text-btn" type="button">New word ↗</button>
                         </div>
-                        <div class="res-stat">
-                            <span class="res-val" id="res-time">0.00s</span>
-                            <span class="res-lab">Time</span>
+
+                        <div class="word-zone">
+                            <div id="round-kicker" class="round-kicker">Ready when you are</div>
+                            <div id="word-display" class="word-display"></div>
+                            <button id="replay-audio-btn" class="listen-btn hidden" type="button">Listen again</button>
+                            <div id="timer-wrap" class="timer-wrap hidden">
+                                <div id="timer-bar" class="timer-bar"></div>
+                            </div>
+                            <input id="type-input" class="type-input" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Start typing">
+                            <div class="keyboard-hint"><kbd>enter</kbd> next word <span>·</span> paste disabled</div>
                         </div>
-                    </div>
-                    <div style="display:flex;gap:10px;margin-top:10px;">
-                        <button id="submit-wpm-btn" style="flex:1;background:#4caf50;color:#000;padding:12px;border-radius:10px;border:none;cursor:pointer;">Submit WPM</button>
-                    </div>
-                    <button id="next-btn" style="margin-top:12px;">Next Word</button>
+
+                        <div class="session-stats">
+                            <div>
+                                <span>Last speed</span>
+                                <strong><b id="last-wpm">0</b> WPM</strong>
+                            </div>
+                            <div>
+                                <span>Personal best</span>
+                                <strong><b id="best-wpm">0</b> WPM</strong>
+                            </div>
+                            <div>
+                                <span>Current streak</span>
+                                <strong><b id="streak-value">0</b> words</strong>
+                            </div>
+                        </div>
+                    </section>
+
+                    <aside class="challenge-card">
+                        <div class="challenge-icon">⌁</div>
+                        <span class="eyebrow">Daily challenge</span>
+                        <h2>Precision run</h2>
+                        <p>Complete ten words without a mistake. Every clean word raises your multiplier.</p>
+                        <div class="challenge-progress">
+                            <span><b id="challenge-count">0</b> / 10 words</span>
+                            <span id="challenge-label">0%</span>
+                        </div>
+                        <div class="progress-track"><div id="challenge-bar"></div></div>
+                        <button id="custom-word-btn" class="secondary full" type="button">Practice a custom word</button>
+                    </aside>
                 </div>
-            </div>
+            </section>
+
+            <section id="arena-view" class="view">
+                <div id="arena-home">
+                    <div class="arena-hero">
+                        <div>
+                            <span class="eyebrow">Live multiplayer</span>
+                            <h1>Race the room.</h1>
+                            <p>Everyone gets the same words. Reach 12 first or lead the board when 90 seconds runs out.</p>
+                        </div>
+                        <button id="quick-play-btn" class="primary large" type="button">Quick play</button>
+                    </div>
+                    <div class="arena-grid">
+                        <section class="panel room-browser">
+                            <div class="panel-heading">
+                                <div>
+                                    <span class="eyebrow">Public rooms</span>
+                                    <h2>Choose your competition</h2>
+                                </div>
+                                <button id="refresh-rooms-btn" class="icon-btn" type="button">↻</button>
+                            </div>
+                            <div id="room-list" class="room-list"></div>
+                        </section>
+                        <section class="panel create-room">
+                            <span class="eyebrow">Make a room</span>
+                            <h2>Set the pace</h2>
+                            <label class="field">
+                                <span>Room name</span>
+                                <input id="room-name-input" maxlength="30" placeholder="Friday night finals">
+                            </label>
+                            <label class="field">
+                                <span>Difficulty</span>
+                                <select id="room-mode-select">
+                                    <option>Easy</option>
+                                    <option selected>Normal</option>
+                                    <option>Hard</option>
+                                    <option>Super Hard</option>
+                                </select>
+                            </label>
+                            <label class="toggle-line">
+                                <span>
+                                    <strong>Private room</strong>
+                                    <small>Join with an invite code</small>
+                                </span>
+                                <input id="private-room-checkbox" type="checkbox">
+                            </label>
+                            <button id="create-room-btn" class="primary full" type="button">Create room</button>
+                            <div class="join-code-row">
+                                <input id="join-code-input" maxlength="8" placeholder="Invite code">
+                                <button id="join-code-btn" class="secondary" type="button">Join</button>
+                            </div>
+                        </section>
+                    </div>
+                </div>
+
+                <div id="room-view" class="room-view hidden">
+                    <div class="room-header">
+                        <button id="leave-room-btn" class="secondary" type="button">← Leave</button>
+                        <div>
+                            <span id="room-privacy" class="eyebrow">Public room</span>
+                            <h2 id="active-room-name">Room</h2>
+                        </div>
+                        <div id="invite-code-wrap" class="invite-code hidden">
+                            <span>Invite code</span>
+                            <button id="copy-code-btn" type="button">CODE</button>
+                        </div>
+                        <button id="start-match-btn" class="primary hidden" type="button">Start match</button>
+                    </div>
+
+                    <div id="lobby-state" class="lobby-grid">
+                        <section class="panel">
+                            <span class="eyebrow">Players</span>
+                            <h2>Starting lineup</h2>
+                            <div id="lobby-player-list" class="lobby-player-list"></div>
+                        </section>
+                        <section class="panel room-rules">
+                            <span class="eyebrow">Win condition</span>
+                            <h2>First to 12</h2>
+                            <div class="rule"><b>90</b><span>seconds</span></div>
+                            <div class="rule"><b>12</b><span>words to finish</span></div>
+                            <div class="rule"><b>+25</b><span>speed bonus</span></div>
+                            <p id="lobby-message">Waiting for the host to start the match.</p>
+                        </section>
+                    </div>
+
+                    <div id="match-state" class="match-grid hidden">
+                        <section class="match-stage">
+                            <div class="match-meta">
+                                <span id="match-position">Position #1</span>
+                                <strong id="match-clock">1:30</strong>
+                                <span><b id="match-progress">0</b> / 12 words</span>
+                            </div>
+                            <div id="match-word" class="word-display arena-word"></div>
+                            <input id="match-input" class="type-input" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Type to race">
+                            <div id="match-feedback" class="match-feedback">The race begins now.</div>
+                        </section>
+                        <aside class="panel standings-panel">
+                            <span class="eyebrow">Live standings</span>
+                            <h2>Leaderboard</h2>
+                            <div id="standings-list" class="standings-list"></div>
+                        </aside>
+                    </div>
+                </div>
+            </section>
         </main>
+    </div>
 
-        <footer>
-            <button id="replay-audio-btn" class="secondary-btn hidden">🔊</button>
-            <button id="change-word-btn" class="secondary-btn">Random</button>
-            <button id="custom-word-btn" class="secondary-btn">Custom</button>
-            <button id="toggle-difficulty" class="secondary-btn">Mode: Normal</button>
-            <button id="toggle-spelling-bee" class="secondary-btn">Spelling Bee: OFF</button>
-            <button id="toggle-corrections" class="secondary-btn hidden">Corrections: OFF</button>
-            <button id="reveal-word-btn" class="secondary-btn hidden">Reveal Word</button>
-            <!-- Multiplayer removed -->
-            <button id="toggle-timed" class="secondary-btn">Timed: OFF</button>
-        </footer>
+    <div id="toast" class="toast"></div>
 
-        <div id="custom-overlay" class="hidden">
-            <div class="result-card">
-                <h2>Custom Word</h2>
-                <input type="text" id="custom-word-input" placeholder="Type word..." autocomplete="off">
-                <div class="modal-btns">
-                    <button id="set-custom-btn">Start</button>
-                    <button id="cancel-custom-btn" class="cancel-btn">Cancel</button>
-                </div>
-            </div>
+    <div id="auth-modal" class="modal hidden">
+        <div class="modal-card auth-card">
+            <button class="modal-close" data-close="auth-modal" type="button">×</button>
+            <span class="eyebrow">Your competitor profile</span>
+            <h2 id="auth-title">Welcome back</h2>
+            <p id="auth-subtitle">Sign in to join live races and keep your wins.</p>
+            <form id="auth-form">
+                <label id="username-field" class="field">
+                    <span>Username</span>
+                    <input id="auth-username" minlength="3" maxlength="18" autocomplete="username" required>
+                </label>
+                <label class="field">
+                    <span>Password</span>
+                    <input id="auth-password" type="password" minlength="8" maxlength="72" autocomplete="current-password" required>
+                </label>
+                <button id="auth-submit" class="primary full" type="submit">Sign in</button>
+            </form>
+            <button id="auth-switch" class="text-btn centered" type="button">New here? Create an account</button>
+            <div id="auth-error" class="form-error"></div>
         </div>
     </div>
 
-    <script type="importmap">
-    {
-        "imports": {
-            "words": "./words.js"
-        }
-    }
-    </script>
+    <div id="custom-modal" class="modal hidden">
+        <div class="modal-card">
+            <button class="modal-close" data-close="custom-modal" type="button">×</button>
+            <span class="eyebrow">Focused practice</span>
+            <h2>Choose any word</h2>
+            <label class="field">
+                <span>Custom word or phrase</span>
+                <input id="custom-word-input" maxlength="120" placeholder="antidisestablishmentarianism">
+            </label>
+            <button id="set-custom-btn" class="primary full" type="button">Start practice</button>
+        </div>
+    </div>
+
+    <div id="results-modal" class="modal hidden">
+        <div class="modal-card result-card">
+            <span class="eyebrow">Word complete</span>
+            <h2 id="result-title">Clean finish</h2>
+            <div class="result-number"><b id="result-wpm">0</b><span>WPM</span></div>
+            <p id="result-time">Finished in 0.00 seconds</p>
+            <button id="next-btn" class="primary full" type="button">Next word</button>
+        </div>
+    </div>
+
+    <script src="socket.io.min.js"></script>
     <script type="module" src="app.js"></script>
 </body>
 </html>
