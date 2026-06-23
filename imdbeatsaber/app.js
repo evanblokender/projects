@@ -1,252 +1,480 @@
-const API_BASE = 'https://api.beatsaver.com';
+const BEATSAVER_API = 'https://api.beatsaver.com';
+const RAILWAY_BACKEND_URL = 'https://imdbeatsaber-backend-production.up.railway.app';
 
-const qs = (s) => document.querySelector(s);
-const qsa = (s) => Array.from(document.querySelectorAll(s));
+const state = {
+  query: 'camellia',
+  page: 0,
+  order: 'Rating',
+  filters: new Set(),
+  maps: [],
+  currentMap: null,
+  accessToken: localStorage.getItem('imd_access_token') || '',
+  user: null
+};
 
-const searchInput = qs('#searchInput');
-const searchBtn = qs('#searchBtn');
-const resultsEl = qs('#results');
-const recommendedEl = qs('#recommended');
+const $ = (selector) => document.querySelector(selector);
 
-const modal = qs('#modal');
-const closeModal = qs('#closeModal');
-const modalCover = qs('#modalCover');
-const modalTitle = qs('#modalTitle');
-const modalAuthor = qs('#modalAuthor');
-const modalDesc = qs('#modalDesc');
-const modalMods = qs('#modalMods');
-const modalStars = qs('#modalStars');
-const modalVotes = qs('#modalVotes');
-const beatsaverLink = qs('#beatsaverLink');
+const els = {
+  searchForm: $('#searchForm'),
+  searchInput: $('#searchInput'),
+  sortSelect: $('#sortSelect'),
+  results: $('#results'),
+  spotlight: $('#spotlight'),
+  statusTitle: $('#statusTitle'),
+  statusText: $('#statusText'),
+  loadMore: $('#loadMoreButton'),
+  chips: Array.from(document.querySelectorAll('.chip')),
+  modal: $('#mapModal'),
+  closeModal: $('#closeModal'),
+  modalCover: $('#modalCover'),
+  modalKicker: $('#modalKicker'),
+  modalTitle: $('#modalTitle'),
+  modalMeta: $('#modalMeta'),
+  modalStats: $('#modalStats'),
+  modalTags: $('#modalTags'),
+  modalDescription: $('#modalDescription'),
+  beatsaverLink: $('#beatsaverLink'),
+  downloadLink: $('#downloadLink'),
+  reviewsSummary: $('#reviewsSummary'),
+  reviewsList: $('#reviewsList'),
+  reviewForm: $('#reviewForm'),
+  reviewStars: $('#reviewStars'),
+  reviewBody: $('#reviewBody'),
+  reviewLoginButton: $('#reviewLoginButton'),
+  accountButton: $('#accountButton'),
+  accountPanel: $('#accountPanel'),
+  closeAccount: $('#closeAccount'),
+  accountState: $('#accountState'),
+  loginForm: $('#loginForm'),
+  registerForm: $('#registerForm'),
+  logoutButton: $('#logoutButton'),
+  authMessage: $('#authMessage')
+};
 
-function toStars(rating){
-  // rating likely 0..5 or 0..1; handle both
-  if (rating == null) return 0;
-  let r = Number(rating);
-  if (r <= 1) r = r * 5; // convert 0..1 to 0..5
-  r = Math.max(0, Math.min(5, r));
-  return Math.round(r);
+const backendBase = RAILWAY_BACKEND_URL.replace(/\/+$/, '');
+
+function text(value, fallback = '') {
+  return value == null || value === '' ? fallback : String(value);
 }
 
-function ratingFromMap(map){
+function formatNumber(value) {
+  const n = Number(value || 0);
+  if (n >= 1000000) return `${(n / 1000000).toFixed(1)}m`;
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
+  return String(n);
+}
+
+function formatDuration(seconds) {
+  const total = Math.max(0, Number(seconds || 0));
+  const min = Math.floor(total / 60);
+  const sec = Math.floor(total % 60).toString().padStart(2, '0');
+  return total ? `${min}:${sec}` : 'Unknown';
+}
+
+function mapKey(map) {
+  return text(map.key || map.id, 'unknown');
+}
+
+function latestVersion(map) {
+  return Array.isArray(map.versions) ? map.versions[0] : null;
+}
+
+function coverFor(map) {
+  const version = latestVersion(map);
+  return version?.coverURL || map.coverURL || version?.imageURL || '';
+}
+
+function authorFor(map) {
+  return map.uploader?.name || map.metadata?.levelAuthorName || map.metadata?.songAuthorName || 'Unknown mapper';
+}
+
+function songLine(map) {
+  const song = text(map.metadata?.songName || map.name, 'Untitled');
+  const artist = text(map.metadata?.songAuthorName);
+  return artist ? `${song} by ${artist}` : song;
+}
+
+function ratingPercent(map) {
   const stats = map.stats || {};
-  // Prefer explicit rating if present
-  if (typeof map.rating === 'number') return map.rating;
-  if (typeof stats.rating === 'number') return stats.rating;
-  // Derive rating from upvotes/downvotes if needed
+  if (typeof stats.score === 'number') return Math.round(stats.score * 100);
+  if (typeof stats.rating === 'number') return Math.round((stats.rating <= 1 ? stats.rating : stats.rating / 100) * 100);
   const up = stats.upvotes ?? stats.upVotes ?? 0;
   const down = stats.downvotes ?? stats.downVotes ?? 0;
   const total = up + down;
-  if (!total) return 0;
-  // normalize 0..1 for toStars()
-  return up / total;
+  return total ? Math.round((up / total) * 100) : 0;
 }
 
-function makeStarsEl(n){
-  const wrapper = document.createElement('div');
-  wrapper.className = 'stars';
-  for(let i=1;i<=5;i++){
-    const span = document.createElement('span');
-    span.className = 'star ' + (i<=n ? '' : 'empty-star');
-    span.textContent = i<=n ? '★' : '☆';
-    wrapper.appendChild(span);
+function requirementTags(map) {
+  const version = latestVersion(map);
+  const requirements = new Set();
+  if (Array.isArray(version?.requirements)) version.requirements.forEach((item) => requirements.add(item));
+  if (Array.isArray(version?.diffs)) {
+    version.diffs.forEach((diff) => {
+      if (Array.isArray(diff.requirements)) diff.requirements.forEach((item) => requirements.add(item));
+      if (diff.characteristic) requirements.add(diff.characteristic);
+    });
   }
-  return wrapper;
+  if (map.ranked) requirements.add('Ranked');
+  if (map.qualified) requirements.add('Qualified');
+  if (map.curatedAt || map.curator) requirements.add('Curated');
+  return Array.from(requirements).filter(Boolean).slice(0, 7);
 }
 
-function coverFor(map){
-  // try available fields
-  const v = map.versions && map.versions[0];
-  return v?.coverURL || map.coverURL || v?.imageURL || 'https://via.placeholder.com/256x256?text=No+Cover';
+function difficultySummary(map) {
+  const version = latestVersion(map);
+  const diffs = Array.isArray(version?.diffs) ? version.diffs : [];
+  const names = [...new Set(diffs.map((diff) => diff.difficulty).filter(Boolean))];
+  return names.length ? names.join(', ') : 'No difficulties listed';
 }
 
-function authorFor(map){
-  return map.metadata?.levelAuthorName || map.metadata?.levelAuthor || 'Unknown';
+function buildSearchUrl(page = 0) {
+  const params = new URLSearchParams();
+  params.set('q', state.query || 'beatsaber');
+  params.set('order', state.order);
+  params.set('pageSize', '30');
+  if (state.filters.has('curated')) params.set('curated', 'true');
+  if (state.filters.has('noodle')) params.set('noodle', 'true');
+  if (state.filters.has('chroma')) params.set('chroma', 'true');
+  if (state.filters.has('cinema')) params.set('cinema', 'true');
+  if (state.filters.has('ranked')) params.set('leaderboard', 'Ranked');
+  return `${BEATSAVER_API}/search/text/${page}?${params.toString()}`;
 }
 
-function descriptionFor(map){
-  return map.description || map.metadata?.description || map.name || '';
+function setStatus(title, message) {
+  els.statusTitle.textContent = title;
+  els.statusText.textContent = message;
 }
 
-function modsFor(map){
-  // Look into versions/diffs requirements to detect things like Noodle Extensions, Chroma, etc.
-  const v = map.versions && map.versions[0];
-  const modsSet = new Set();
+function renderSkeleton() {
+  els.results.innerHTML = Array.from({ length: 8 }, () => '<div class="skeleton"></div>').join('');
+}
 
-  if (v) {
-    // Some schemas put requirements directly on the version
-    if (Array.isArray(v.requirements)) {
-      v.requirements.forEach(r => r && modsSet.add(String(r)));
-    }
-
-    // Most commonly, requirements live on individual diffs
-    if (Array.isArray(v.diffs)) {
-      v.diffs.forEach(d => {
-        if (Array.isArray(d.requirements)) {
-          d.requirements.forEach(r => r && modsSet.add(String(r)));
-        } else if (d.requirements) {
-          modsSet.add(String(d.requirements));
-        }
-      });
-    }
-
-    // Custom environment / other hints
-    if (v.customEnvironment) modsSet.add(String(v.customEnvironment));
-  }
-
-  // Fall back to any top-level hints
-  if (Array.isArray(map.requirements)) {
-    map.requirements.forEach(r => r && modsSet.add(String(r)));
-  } else if (map.requirements) {
-    modsSet.add(String(map.requirements));
+async function fetchMaps({ append = false } = {}) {
+  if (!append) {
+    state.page = 0;
+    state.maps = [];
+    els.spotlight.classList.add('hidden');
+    renderSkeleton();
   }
 
-  const mods = Array.from(modsSet);
-  if (!mods.length) return 'None detected';
-  return mods.join(', ');
+  setStatus('Searching maps', `${state.query || 'Beat Saber'} sorted by ${state.order.toLowerCase()}.`);
+
+  try {
+    const res = await fetch(buildSearchUrl(state.page));
+    if (!res.ok) throw new Error(`BeatSaver returned ${res.status}`);
+    const json = await res.json();
+    const docs = Array.isArray(json.docs) ? json.docs : [];
+
+    state.maps = append ? state.maps.concat(docs) : docs;
+    renderMaps();
+    els.loadMore.classList.toggle('hidden', docs.length < 30);
+    setStatus(`${state.maps.length} maps loaded`, docs.length ? 'Open a map for downloads, requirements, reviews, and details.' : 'Try a different search or remove a filter.');
+  } catch (error) {
+    console.error(error);
+    els.results.innerHTML = '<div class="empty-state">BeatSaver did not answer. Check your connection or try again in a minute.</div>';
+    els.loadMore.classList.add('hidden');
+    setStatus('Search failed', 'BeatSaver may be down or rate limited.');
+  }
 }
 
-function mapToCard(map){
-  const card = document.createElement('div');
+function renderMaps() {
+  if (!state.maps.length) {
+    els.results.innerHTML = '<div class="empty-state">No maps matched that search.</div>';
+    return;
+  }
+
+  renderSpotlight(state.maps[0]);
+  els.results.innerHTML = '';
+  state.maps.forEach((map) => els.results.appendChild(createCard(map)));
+}
+
+function renderSpotlight(map) {
+  els.spotlight.classList.remove('hidden');
+  els.spotlight.innerHTML = `
+    <img src="${coverFor(map)}" alt="" />
+    <div class="spotlight-content">
+      <div class="kicker">Featured result</div>
+      <h2>${escapeHtml(songLine(map))}</h2>
+      <p>${escapeHtml(authorFor(map))} | ${ratingPercent(map)}% rating | ${difficultySummary(map)}</p>
+    </div>
+  `;
+  els.spotlight.onclick = () => openMap(map);
+}
+
+function createCard(map) {
+  const card = document.createElement('article');
   card.className = 'card';
   card.tabIndex = 0;
   card.innerHTML = `
-    <div class="left"><img src="${coverFor(map)}" alt="cover" loading="lazy" /></div>
-    <div class="info">
-      <div class="name">${escapeHtml(map.name)}</div>
-      <div class="author">${escapeHtml(authorFor(map))}</div>
+    <img src="${coverFor(map)}" alt="" loading="lazy" />
+    <div>
+      <h3>${escapeHtml(songLine(map))}</h3>
+      <div class="mapper">${escapeHtml(authorFor(map))}</div>
+      <div class="stat-row">
+        <span class="pill gold">${ratingPercent(map)}%</span>
+        <span class="pill">${formatNumber(map.stats?.upvotes ?? map.stats?.upVotes)} up</span>
+        <span class="pill">${formatDuration(map.metadata?.duration)}</span>
+      </div>
     </div>
   `;
-  const stars = makeStarsEl(toStars(ratingFromMap(map)));
-  card.querySelector('.info').appendChild(stars);
-
-  card.addEventListener('click', () => openModal(map));
-  card.addEventListener('keypress', (e) => { if (e.key === 'Enter') openModal(map); });
-
+  card.addEventListener('click', () => openMap(map));
+  card.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') openMap(map);
+  });
   return card;
 }
 
-function escapeHtml(str){
-  if (!str) return '';
-  return String(str).replace(/[&<>"']/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[s]));
+function openMap(map) {
+  state.currentMap = map;
+  const version = latestVersion(map);
+  const key = mapKey(map);
+  els.modalCover.src = coverFor(map);
+  els.modalKicker.textContent = key ? `BeatSaver ${key}` : 'BeatSaver map';
+  els.modalTitle.textContent = songLine(map);
+  els.modalMeta.textContent = `${authorFor(map)} | ${difficultySummary(map)}`;
+  els.modalStats.innerHTML = [
+    ['Rating', `${ratingPercent(map)}%`],
+    ['Upvotes', formatNumber(map.stats?.upvotes ?? map.stats?.upVotes)],
+    ['Downvotes', formatNumber(map.stats?.downvotes ?? map.stats?.downVotes)],
+    ['Length', formatDuration(map.metadata?.duration)],
+    ['BPM', text(map.metadata?.bpm, 'Unknown')],
+    ['Uploaded', text(map.uploaded ? new Date(map.uploaded).toLocaleDateString() : '')]
+  ].map(([label, value]) => `<div class="stat-box"><strong>${escapeHtml(value)}</strong><span>${escapeHtml(label)}</span></div>`).join('');
+  const tags = requirementTags(map);
+  els.modalTags.innerHTML = tags.length ? tags.map((tag) => `<span class="pill good">${escapeHtml(tag)}</span>`).join('') : '<span class="pill">No special requirements detected</span>';
+  els.modalDescription.textContent = text(map.description || map.metadata?.description, 'No description available.');
+  els.beatsaverLink.href = key ? `https://beatsaver.com/maps/${key}` : 'https://beatsaver.com';
+  els.downloadLink.href = version?.downloadURL || els.beatsaverLink.href;
+  els.modal.classList.remove('hidden');
+  loadReviews(key);
 }
 
-async function search(query){
-  if (!query || !query.trim()) return;
-  resultsEl.innerHTML = '';
-  const q = encodeURIComponent(query.trim());
-  // use text search endpoint for random
+function closeMap() {
+  els.modal.classList.add('hidden');
+}
+
+function escapeHtml(value) {
+  return text(value).replace(/[&<>"']/g, (char) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;'
+  }[char]));
+}
+
+async function api(path, options = {}) {
+  if (!backendBase) throw new Error('Backend URL is not set in app.js');
+  const headers = new Headers(options.headers || {});
+  headers.set('Content-Type', 'application/json');
+  if (state.accessToken) headers.set('Authorization', `Bearer ${state.accessToken}`);
+
+  const res = await fetch(`${backendBase}${path}`, {
+    ...options,
+    headers,
+    credentials: 'include'
+  });
+
+  if (res.status === 401 && path !== '/api/auth/refresh') {
+    const refreshed = await refreshToken();
+    if (refreshed) return api(path, options);
+  }
+
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `Request failed with ${res.status}`);
+  return data;
+}
+
+async function refreshToken() {
+  if (!backendBase) return false;
   try {
-    const res = await fetch(`${API_BASE}/search/text/0?q=${q}`);
-    if (!res.ok) throw new Error('fetch failed');
-    const j = await res.json();
-    const docs = j.docs || j.maps || j;
-    if (!docs || docs.length === 0) {
-      resultsEl.innerHTML = `<div class="nores" style="color:var(--muted);padding:20px">No results</div>`;
-      return;
-    }
-    docs.slice(0, 80).forEach(m => resultsEl.appendChild(mapToCard(m)));
-  } catch (err) {
-    resultsEl.innerHTML = `<div style="color:var(--muted);padding:20px">Search failed</div>`;
-    console.error(err);
+    const data = await api('/api/auth/refresh', { method: 'POST', body: '{}' });
+    setSession(data);
+    return true;
+  } catch {
+    clearSession();
+    return false;
   }
 }
 
-async function loadRecommended(){
-  // to asure fucking person thinks its doing something
-  recommendedEl.innerHTML = `<div style="color:var(--muted);padding:8px 4px;">Loading random maps...</div>`;
+function setSession(data) {
+  state.accessToken = data.accessToken || '';
+  state.user = data.user || null;
+  if (state.accessToken) localStorage.setItem('imd_access_token', state.accessToken);
+  renderAccount();
+}
 
-  // Use text search pages (which we know work from normal search) as our source,
-  // then shuffle for randomness.
-  async function fetchPage(page){
-    const url = `${API_BASE}/search/text/${page}?q=a`;
-    const res = await fetch(url);
-    if (!res.ok) throw new Error('failed ' + url);
-    const j = await res.json();
-    return j.docs || j.maps || [];
+function clearSession() {
+  state.accessToken = '';
+  state.user = null;
+  localStorage.removeItem('imd_access_token');
+  renderAccount();
+}
+
+function renderAccount() {
+  const signedIn = Boolean(state.user);
+  els.accountButton.textContent = signedIn ? state.user.username : 'Sign in';
+  els.reviewLoginButton.classList.toggle('hidden', signedIn);
+  els.reviewForm.classList.toggle('hidden', !signedIn || !state.currentMap || !backendBase);
+  els.logoutButton.classList.toggle('hidden', !signedIn);
+  els.loginForm.classList.toggle('hidden', signedIn);
+  els.registerForm.classList.toggle('hidden', signedIn);
+  els.accountState.textContent = signedIn ? `Signed in as ${state.user.username}.` : 'Sign in or create an account to rate maps without spam.';
+}
+
+async function loadMe() {
+  if (!backendBase || !state.accessToken) {
+    renderAccount();
+    return;
+  }
+  try {
+    const data = await api('/api/auth/me');
+    state.user = data.user;
+  } catch {
+    clearSession();
+  }
+  renderAccount();
+}
+
+async function loadReviews(key) {
+  els.reviewsList.innerHTML = '';
+  renderAccount();
+
+  if (!backendBase) {
+    els.reviewsSummary.textContent = 'Paste your Railway backend URL into RAILWAY_BACKEND_URL in app.js to enable protected reviews.';
+    return;
   }
 
+  els.reviewsSummary.textContent = 'Loading reviews...';
   try {
-    // three pages of results, then randomize
-    const pages = await Promise.all([
-      fetchPage(0),
-      fetchPage(1),
-      fetchPage(2),
-    ]);
-
-    let maps = pages.flat();
-
-    if (!maps || !maps.length) {
-      recommendedEl.innerHTML = `<div style="color:var(--muted);padding:8px 4px;">No recommended maps found.</div>`;
+    const data = await api(`/api/maps/${encodeURIComponent(key)}/reviews`);
+    const avg = data.summary?.averageRating ? Number(data.summary.averageRating).toFixed(1) : 'No';
+    els.reviewsSummary.textContent = `${avg} average | ${data.summary?.reviewCount || 0} reviews`;
+    if (!data.reviews?.length) {
+      els.reviewsList.innerHTML = '<div class="empty-state">No reviews yet.</div>';
       return;
     }
+    els.reviewsList.innerHTML = data.reviews.map((review) => `
+      <article class="review">
+        <strong>${review.stars}/5 | ${escapeHtml(review.username)}</strong>
+        <p>${escapeHtml(review.body)}</p>
+      </article>
+    `).join('');
+  } catch (error) {
+    els.reviewsSummary.textContent = error.message;
+  }
+}
 
-    // shuffle e full set of maps so they are random every refresh
-    maps = maps.slice();
-    for (let i = maps.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [maps[i], maps[j]] = [maps[j], maps[i]];
-    }
+els.searchForm.addEventListener('submit', (event) => {
+  event.preventDefault();
+  state.query = els.searchInput.value.trim() || 'beatsaber';
+  fetchMaps();
+});
 
-    // pick a reasonable haha number to display in the strip
-    const pick = maps.slice(0, 12);
+els.sortSelect.addEventListener('change', () => {
+  state.order = els.sortSelect.value;
+  fetchMaps();
+});
 
-    recommendedEl.innerHTML = '';
-    pick.forEach(m => {
-      const c = document.createElement('div');
-      c.className = 'reco-card';
-      const stars = toStars(ratingFromMap(m));
-      c.innerHTML = `
-        <img class="cover-thumb" src="${coverFor(m)}" alt="cover" />
-        <div class="reco-info">
-          <div class="title">${escapeHtml(m.name)}</div>
-          <div class="sub">${escapeHtml(authorFor(m))}</div>
-          <div class="stars small-stars">
-            ${'★'.repeat(stars)}${'☆'.repeat(5 - stars)}
-          </div>
-        </div>`;
-      c.addEventListener('click', ()=> openModal(m));
-      recommendedEl.appendChild(c);
+els.chips.forEach((chip) => {
+  chip.addEventListener('click', () => {
+    const filter = chip.dataset.filter;
+    if (state.filters.has(filter)) state.filters.delete(filter);
+    else state.filters.add(filter);
+    chip.classList.toggle('active', state.filters.has(filter));
+    fetchMaps();
+  });
+});
+
+els.loadMore.addEventListener('click', () => {
+  state.page += 1;
+  fetchMaps({ append: true });
+});
+
+els.closeModal.addEventListener('click', closeMap);
+els.modal.addEventListener('click', (event) => {
+  if (event.target === els.modal) closeMap();
+});
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') {
+    closeMap();
+    els.accountPanel.classList.add('hidden');
+  }
+});
+
+els.accountButton.addEventListener('click', () => els.accountPanel.classList.remove('hidden'));
+els.reviewLoginButton.addEventListener('click', () => els.accountPanel.classList.remove('hidden'));
+els.closeAccount.addEventListener('click', () => els.accountPanel.classList.add('hidden'));
+
+els.loginForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  els.authMessage.textContent = 'Signing in...';
+  try {
+    const data = await api('/api/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({
+        email: $('#loginEmail').value,
+        password: $('#loginPassword').value
+      })
     });
-  } catch(e){
-    console.error('recommended failed', e);
-    recommendedEl.innerHTML = `<div style="color:var(--muted);padding:8px 4px;">Failed to load recommended maps.</div>`;
+    setSession(data);
+    els.authMessage.textContent = 'Signed in.';
+    if (state.currentMap) loadReviews(mapKey(state.currentMap));
+  } catch (error) {
+    els.authMessage.textContent = error.message;
   }
-}
+});
 
-function openModal(map){
-  modalCover.src = coverFor(map);
-  modalTitle.textContent = map.name;
-  modalAuthor.textContent = 'by ' + authorFor(map);
-  modalDesc.textContent = descriptionFor(map) || 'No description available.';
-  modalMods.textContent = modsFor(map);
-  const starsN = toStars(ratingFromMap(map));
-  modalStars.innerHTML = '';
-  modalStars.appendChild(makeStarsEl(starsN));
+els.registerForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  els.authMessage.textContent = 'Creating account...';
+  try {
+    const data = await api('/api/auth/register', {
+      method: 'POST',
+      body: JSON.stringify({
+        username: $('#registerUsername').value,
+        email: $('#registerEmail').value,
+        password: $('#registerPassword').value
+      })
+    });
+    setSession(data);
+    els.authMessage.textContent = 'Account created.';
+    if (state.currentMap) loadReviews(mapKey(state.currentMap));
+  } catch (error) {
+    els.authMessage.textContent = error.message;
+  }
+});
 
-  // upvotes / downvotes display main shit
-  const stats = map.stats || {};
-  const up = stats.upvotes ?? stats.upVotes ?? 0;
-  const down = stats.downvotes ?? stats.downVotes ?? 0;
-  modalVotes.textContent = `${up} upvotes • ${down} downvotes`;
-  // set beatsaver link - use key if available else id key should work
-  const key = map.key || map.id || '';
-  beatsaverLink.href = key ? `https://beatsaver.com/beatmap/${key}` : 'https://beatsaver.com';
-  modal.classList.remove('hidden');
-  // close the damn modal
-  closeModal.focus();
-}
+els.logoutButton.addEventListener('click', async () => {
+  try {
+    if (backendBase) await api('/api/auth/logout', { method: 'POST', body: '{}' });
+  } finally {
+    clearSession();
+    els.authMessage.textContent = 'Logged out.';
+    if (state.currentMap) loadReviews(mapKey(state.currentMap));
+  }
+});
 
-closeModal.addEventListener('click', ()=> modal.classList.add('hidden'));
-modal.addEventListener('click', (e)=>{ if (e.target === modal) modal.classList.add('hidden'); });
-document.addEventListener('keydown', (e)=> { if (e.key === 'Escape') modal.classList.add('hidden'); });
+els.reviewForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  if (!state.currentMap) return;
+  const key = mapKey(state.currentMap);
+  try {
+    await api(`/api/maps/${encodeURIComponent(key)}/reviews`, {
+      method: 'POST',
+      body: JSON.stringify({
+        stars: Number(els.reviewStars.value),
+        body: els.reviewBody.value.trim()
+      })
+    });
+    els.reviewBody.value = '';
+    loadReviews(key);
+  } catch (error) {
+    els.reviewsSummary.textContent = error.message;
+  }
+});
 
-searchBtn.addEventListener('click', ()=> search(searchInput.value));
-searchInput.addEventListener('keydown', (e)=> { if (e.key === 'Enter') search(searchInput.value); });
-
-// initial
-loadRecommended();
-
-// small helpful: search on load popular term to show content
-search(''); // will do nothing if empty; optional initial results can be loaded by uncommenting
-
+els.searchInput.value = state.query;
+els.sortSelect.value = state.order;
+loadMe();
+fetchMaps();

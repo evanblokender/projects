@@ -1,47 +1,133 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="theme-color" content="#08090d" />
   <link rel="stylesheet" href="style.css" />
-  <title>imdBeatsaber</title>
+  <title>imdBeatSaver</title>
 </head>
 <body>
-  <div id="app">
-    <div class="topbar">
-      <div class="search">
-        <input id="searchInput" placeholder="Search BeatSaver maps..." autocomplete="off" />
-        <button id="searchBtn" aria-label="Search">🔍</button>
+  <main id="app">
+    <header class="shell-header">
+      <div class="brand">
+        <div class="mark" aria-hidden="true"></div>
+        <div>
+          <h1>imdBeatSaver</h1>
+          <p>Fast Beat Saber map search with ratings, requirements, and community reviews.</p>
+        </div>
       </div>
-      <div class="recommended-pill">Recommended</div>
-    </div>
+      <button id="accountButton" class="ghost-button" type="button">Sign in</button>
+    </header>
 
-    <div id="recommended" class="recommended"></div>
+    <section class="search-panel" aria-label="Map search">
+      <form id="searchForm" class="search-row">
+        <input id="searchInput" name="q" placeholder="Search songs, artists, mappers, tags..." autocomplete="off" />
+        <button id="searchButton" type="submit">Search</button>
+      </form>
 
-    <div id="results" class="results"></div>
-  </div>
+      <div class="controls-row">
+        <label>
+          Sort
+          <select id="sortSelect">
+            <option value="Relevance">Relevance</option>
+            <option value="Rating">Rating</option>
+            <option value="Latest">Latest</option>
+            <option value="Curated">Curated</option>
+            <option value="Duration">Duration</option>
+            <option value="Random">Random</option>
+          </select>
+        </label>
+        <button class="chip" type="button" data-filter="curated">Curated</button>
+        <button class="chip" type="button" data-filter="ranked">Ranked</button>
+        <button class="chip" type="button" data-filter="noodle">Noodle</button>
+        <button class="chip" type="button" data-filter="chroma">Chroma</button>
+        <button class="chip" type="button" data-filter="cinema">Cinema</button>
+      </div>
+    </section>
 
-  <div id="modal" class="modal hidden" role="dialog" aria-modal="true">
+    <section class="status-strip" aria-live="polite">
+      <div>
+        <strong id="statusTitle">Loading maps</strong>
+        <span id="statusText">Fetching a useful starting list.</span>
+      </div>
+      <button id="loadMoreButton" class="ghost-button hidden" type="button">Load more</button>
+    </section>
+
+    <section id="spotlight" class="spotlight hidden" aria-label="Featured map"></section>
+    <section id="results" class="results" aria-label="Map results"></section>
+  </main>
+
+  <div id="mapModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
     <div class="modal-card">
-      <button class="close-btn" id="closeModal">✕</button>
-      <div class="modal-content">
-        <img id="modalCover" class="cover" alt="cover" />
-        <div class="meta">
+      <button id="closeModal" class="icon-button close-button" type="button" aria-label="Close">x</button>
+      <div class="modal-grid">
+        <img id="modalCover" class="modal-cover" alt="" />
+        <div class="modal-main">
+          <div class="modal-kicker" id="modalKicker"></div>
           <h2 id="modalTitle"></h2>
-          <div id="modalAuthor" class="author"></div>
-          <div id="modalStars" class="stars"></div>
-          <div id="modalVotes" class="votes"></div>
-          <div class="mods-row"><strong>Mods required:</strong> <span id="modalMods"></span></div>
-          <p id="modalDesc" class="desc"></p>
-          <div class="modal-actions">
-            <a id="beatsaverLink" class="bs-link" target="_blank" rel="noopener">Open on BeatSaver</a>
+          <p id="modalMeta" class="muted"></p>
+          <div id="modalStats" class="stats-grid"></div>
+          <div id="modalTags" class="tag-row"></div>
+          <p id="modalDescription" class="description"></p>
+          <div class="action-row">
+            <a id="beatsaverLink" class="primary-link" target="_blank" rel="noopener">BeatSaver</a>
+            <a id="downloadLink" class="ghost-link" target="_blank" rel="noopener">Download</a>
           </div>
         </div>
       </div>
+
+      <section class="reviews-panel">
+        <div class="reviews-head">
+          <div>
+            <h3>Community reviews</h3>
+            <p id="reviewsSummary" class="muted">Backend not connected yet.</p>
+          </div>
+          <button id="reviewLoginButton" class="ghost-button" type="button">Sign in to review</button>
+        </div>
+        <form id="reviewForm" class="review-form hidden">
+          <label>
+            Stars
+            <select id="reviewStars">
+              <option value="5">5</option>
+              <option value="4">4</option>
+              <option value="3">3</option>
+              <option value="2">2</option>
+              <option value="1">1</option>
+            </select>
+          </label>
+          <textarea id="reviewBody" maxlength="1200" placeholder="What should players know before downloading?"></textarea>
+          <button class="primary-button" type="submit">Post review</button>
+        </form>
+        <div id="reviewsList" class="reviews-list"></div>
+      </section>
     </div>
   </div>
+
+  <aside id="accountPanel" class="account-panel hidden" aria-label="Account panel">
+    <button id="closeAccount" class="icon-button" type="button" aria-label="Close">x</button>
+    <h2>Account</h2>
+    <p id="accountState" class="muted">Sign in or create an account to rate maps without spam.</p>
+
+    <form id="loginForm" class="auth-form">
+      <h3>Sign in</h3>
+      <input id="loginEmail" type="email" placeholder="Email" autocomplete="email" />
+      <input id="loginPassword" type="password" placeholder="Password" autocomplete="current-password" />
+      <button class="primary-button" type="submit">Sign in</button>
+    </form>
+
+    <form id="registerForm" class="auth-form">
+      <h3>Create account</h3>
+      <input id="registerUsername" placeholder="Username" autocomplete="username" />
+      <input id="registerEmail" type="email" placeholder="Email" autocomplete="email" />
+      <input id="registerPassword" type="password" placeholder="Password" autocomplete="new-password" />
+      <button class="ghost-button" type="submit">Create account</button>
+    </form>
+
+    <button id="logoutButton" class="danger-button hidden" type="button">Log out</button>
+    <p id="authMessage" class="form-message"></p>
+  </aside>
 
   <script type="module" src="app.js"></script>
 </body>
 </html>
-
