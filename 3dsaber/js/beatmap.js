@@ -85,6 +85,7 @@ function parseEnvironment(cd, v2) {
     const mats = (v2 ? cd._materials : cd.materials) || {};
     const out = [];
     for (const e of list) {
+        if ((v2 ? e._active : e.active) === false) continue;   // disabled entries
         const geo = v2 ? e._geometry : e.geometry;
         if (!geo) continue;
         let m = v2 ? geo._material : geo.material;
@@ -375,13 +376,17 @@ function parseV2(map, baseBpm) {
         if (o._type === 2) { y = o._lineLayer || 0; h = o._height || 5; }
         else if (o._type === 1) { y = 2; h = 3; }   // crouch
         else { y = 0; h = 5; }                       // full height
-        let w = o._width || 1;
+        let w = o._width || 1, l = null;
         if (Array.isArray(cd._position)) { x = cd._position[0] + 2; y = cd._position[1]; }
-        if (Array.isArray(cd._scale)) { w = cd._scale[0] || w; h = cd._scale[1] || h; }
+        if (Array.isArray(cd._scale)) {
+            w = cd._scale[0] || w;
+            h = cd._scale[1] || h;
+            if (cd._scale[2] != null) l = cd._scale[2];
+        }
         walls.push({
             time: clock.toSeconds(o._time),
             duration: Math.max(0, clock.toSeconds(o._time + (o._duration || 0)) - clock.toSeconds(o._time)),
-            x, y, w, h,
+            x, y, w, h, l,
             chroma: normColor(cd._color),
             decorative: !!cd._fake || cd._interactable === false,
             localRot: Array.isArray(cd._localRotation) ? cd._localRotation : null,
@@ -475,12 +480,16 @@ function parseV3(map, baseBpm) {
     const pushWall = (o, forceDec = false) => {
         const cd = o.customData || {};
         const base = v3Common(o, forceDec);
-        let w = o.w || 1, h = o.h || 1;
-        if (Array.isArray(cd.size)) { w = cd.size[0] || w; h = cd.size[1] || h; }
+        let w = o.w || 1, h = o.h || 1, l = null;
+        if (Array.isArray(cd.size)) {
+            w = cd.size[0] || w;
+            h = cd.size[1] || h;
+            if (cd.size[2] != null) l = cd.size[2];   // explicit length in grid units
+        }
         walls.push({
             ...base,
             duration: Math.max(0, clock.toSeconds(o.b + (o.d || 0)) - base.time),
-            w, h,
+            w, h, l,
             chroma: normColor(cd.color),
         });
     };

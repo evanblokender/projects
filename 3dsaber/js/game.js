@@ -13,6 +13,9 @@ import { settings } from './settings.js';
 
 // ---------- World constants ----------
 const HIT_Z = -1.6;
+// Chroma/Unity world origin is where the player stands; our camera home is z=4,
+// so BS z=0 maps to our z=4 and distances from the player stay correct.
+const ENV_Z_ORIGIN = 4.0;
 const COL_STEP = 0.65;
 const LAYER_BASE = 0.75;
 const LAYER_STEP = 0.55;
@@ -762,11 +765,11 @@ export class Gameplay {
         const key = String(type);
         if (!this._envGeoCache[key]) {
             let g;
-            switch (key) {
+            switch (key) {   // sized to match Unity's primitives
                 case 'Sphere':   g = new THREE.SphereGeometry(0.5, 16, 12); break;
                 case 'Capsule':  g = new THREE.CapsuleGeometry(0.5, 1, 4, 12); break;
-                case 'Cylinder': g = new THREE.CylinderGeometry(0.5, 0.5, 1, 16); break;
-                case 'Plane':    g = new THREE.PlaneGeometry(10, 10); break;
+                case 'Cylinder': g = new THREE.CylinderGeometry(0.5, 0.5, 2, 16); break;   // Unity: 2m tall
+                case 'Plane':    g = new THREE.PlaneGeometry(10, 10).rotateX(-Math.PI / 2); break; // Unity: flat, +Y normal
                 case 'Quad':     g = new THREE.PlaneGeometry(1, 1); break;
                 case 'Triangle': {
                     const shape = new THREE.Shape();
@@ -795,6 +798,7 @@ export class Gameplay {
             if (/OpaqueLight/i.test(shader)) {
                 m = new THREE.MeshStandardMaterial({
                     color: c.clone().multiplyScalar(0.15), emissive: c, emissiveIntensity: 1.6,
+                    side: THREE.DoubleSide,
                 });
             } else if (/TransparentLight|BillieWater|Water/i.test(shader)) {
                 m = new THREE.MeshBasicMaterial({
@@ -802,7 +806,9 @@ export class Gameplay {
                     blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
                 });
             } else {           // Standard / BTSPillar / InterscopeConcrete / etc.
-                m = new THREE.MeshStandardMaterial({ color: c, roughness: 0.45, metalness: 0.35 });
+                m = new THREE.MeshStandardMaterial({
+                    color: c, roughness: 0.45, metalness: 0.35, side: THREE.DoubleSide,
+                });
             }
             this._envMatCache[key] = m;
         }
@@ -811,21 +817,25 @@ export class Gameplay {
 
     _envTransform(target, e) {
         const pos = e.position || e.localPosition || [0, 0, 0];
-        // Chroma env positions are Unity meters, +z forward → our -z
-        target.position.set(pos[0] || 0, pos[1] || 0, -(pos[2] || 0));
+        // Chroma env positions are Unity meters anchored at the player,
+        // +z forward → our -z from the player's standpoint (ENV_Z_ORIGIN)
+        target.position.set(pos[0] || 0, pos[1] || 0, ENV_Z_ORIGIN - (pos[2] || 0));
         const rot = e.rotation || e.localRotation || [0, 0, 0];
-        target.rotation.set(
-            THREE.MathUtils.degToRad(rot[0] || 0),
-            -THREE.MathUtils.degToRad(rot[1] || 0),
-            THREE.MathUtils.degToRad(rot[2] || 0)
-        );
+        setUnityRotation(target, rot[0] || 0, rot[1] || 0, rot[2] || 0);
         const sc = e.scale || [1, 1, 1];
         target.scale.set(sc[0] || 0.0001, sc[1] || 0.0001, sc[2] || 0.0001);
     }
 
     spawnEnvironment(list) {
         this.envMeshes = [];
+        this.trackedEnvMeshes = [];
         if (!list || !list.length) return;
+
+        // Model maps place pieces 30–100m out; our default fog would swallow
+        // them, so thin it while environment geometry is present.
+        if (this.scene.fog) {
+            this.scene.fog.density = Math.min(this.scene.fog.density, 0.009);
+        }
 
         // No cap — model maps need every piece. Static (untracked) geometry is
         // merged per material into single draw calls so huge models stay fast.
@@ -839,6 +849,11 @@ export class Gameplay {
                 const mesh = new THREE.Mesh(this.envGeometry(e.type), material);
                 this._envTransform(mesh, e);
                 this.tracks.containerFor(e.track).add(mesh);
+                this.tracks.track(e.track[0]).posScale = 1;   // env tracks animate in meters
+                // scale/localRotation apply per-object (own pivot) per Heck spec
+                mesh.userData.envBase = { scale: mesh.scale.clone(), quat: mesh.quaternion.clone() };
+                mesh.userData.envTrack = e.track[0];
+                this.trackedEnvMeshes.push(mesh);
                 this.envMeshes.push(mesh);
             } else {
                 this._envTransform(helper, e);
@@ -873,11 +888,7 @@ export class Gameplay {
     attachObject(group, obj) {
         const wrapper = new THREE.Group();
         if (obj.worldRot) {
-            wrapper.rotation.set(
-                THREE.MathUtils.degToRad(obj.worldRot[0]),
-                -THREE.MathUtils.degToRad(obj.worldRot[1]),
-                THREE.MathUtils.degToRad(obj.worldRot[2])
-            );
+            setUnityRotation(wrapper, obj.worldRot[0], obj.worldRot[1], obj.worldRot[2]);
         }
         wrapper.userData.baseRot = wrapper.rotation.clone();
         wrapper.add(group);
@@ -958,7 +969,10 @@ export class Gameplay {
         // Wall art uses huge/tiny/negative sizes — preserve them, just keep sane bounds
         const width = Math.min(60, Math.max(0.03, Math.abs(w.w))) * COL_STEP;
         const height = Math.min(60, Math.max(0.03, Math.abs(w.h))) * LAYER_STEP;
-        const length = Math.min(300, Math.max(0.05, w.duration * this.noteSpeed(w)));
+        // NE size[2] overrides duration-based length (grid units)
+        const length = w.l != null
+            ? Math.min(300, Math.max(0.05, Math.abs(w.l) * UNIT))
+            : Math.min(300, Math.max(0.05, w.duration * this.noteSpeed(w)));
         const color = w.chroma
             ? new THREE.Color(Math.min(1, w.chroma[0]), Math.min(1, w.chroma[1]), Math.min(1, w.chroma[2]))
             : new THREE.Color(0xff2d55);
@@ -1044,6 +1058,35 @@ export class Gameplay {
         // Noodle: custom events, track animations, player movement
         this.tracks.update(t);
 
+        // env model pieces: per-object scale/localRotation from their track
+        for (const mesh of this.trackedEnvMeshes) {
+            const tr = this.tracks.tracks.get(mesh.userData.envTrack);
+            if (!tr) continue;
+            const v = tr.values;
+            const b = mesh.userData.envBase;
+            if (v.scale) {
+                mesh.scale.set(b.scale.x * (v.scale[0] || 1), b.scale.y * (v.scale[1] || 1), b.scale.z * (v.scale[2] || 1));
+            }
+            if (v.localRotation) {
+                this._tmpQ = this._tmpQ || new THREE.Quaternion();
+                this._tmpE = this._tmpE || new THREE.Euler();
+                this._tmpE.set(
+                    -THREE.MathUtils.degToRad(v.localRotation[0]),
+                    -THREE.MathUtils.degToRad(v.localRotation[1]),
+                    THREE.MathUtils.degToRad(v.localRotation[2]), 'YXZ');
+                this._tmpQ.setFromEuler(this._tmpE);
+                mesh.quaternion.copy(b.quat).multiply(this._tmpQ);
+            }
+        }
+
+        // Chroma fog (AssignFogTrack / AnimateComponent BloomFogEnvironment)
+        const fog = this.tracks.fogValues();
+        if (fog && this.scene.fog) {
+            if (fog.attenuation !== undefined) {
+                this.scene.fog.density = THREE.MathUtils.clamp(fog.attenuation[0] * 8, 0.0004, 0.25);
+            }
+        }
+
         this.moveNotes(t, dt);
         this.moveBombs(t);
         this.moveWalls(t, dt);
@@ -1066,14 +1109,16 @@ export class Gameplay {
             g.position.z -= fx.offsetPosition[2] * UNIT;
         }
         if (fx.localRotation) {
-            g.rotation.x += THREE.MathUtils.degToRad(fx.localRotation[0]);
+            // Unity left-handed → our mirrored-z right-handed: flip x and y signs
+            g.rotation.x -= THREE.MathUtils.degToRad(fx.localRotation[0]);
             g.rotation.y -= THREE.MathUtils.degToRad(fx.localRotation[1]);
             g.rotation.z += THREE.MathUtils.degToRad(fx.localRotation[2]);
         }
         if (fx.rotation && ud.wrapper) {
             const b = ud.wrapper.userData.baseRot;
+            ud.wrapper.rotation.order = 'YXZ';
             ud.wrapper.rotation.set(
-                (b ? b.x : 0) + THREE.MathUtils.degToRad(fx.rotation[0]),
+                (b ? b.x : 0) - THREE.MathUtils.degToRad(fx.rotation[0]),
                 (b ? b.y : 0) - THREE.MathUtils.degToRad(fx.rotation[1]),
                 (b ? b.z : 0) + THREE.MathUtils.degToRad(fx.rotation[2])
             );
@@ -1108,10 +1153,11 @@ export class Gameplay {
             const fx = (n.anim || n.track) ? this.tracks.combine(n.anim, n.track, lifeP) : null;
 
             if (fx && fx.definitePosition) {
-                // full flight path defined by the map
+                // full flight path defined by the map — relative to the
+                // object's lane x/y per the Heck spec
                 g.position.set(
-                    fx.definitePosition[0] * UNIT,
-                    fx.definitePosition[1] * UNIT,
+                    ud.x + fx.definitePosition[0] * UNIT,
+                    ud.targetY + fx.definitePosition[1] * UNIT,
                     HIT_Z - fx.definitePosition[2] * UNIT
                 );
                 g.rotation.set(0, 0, 0);
@@ -1141,35 +1187,36 @@ export class Gameplay {
             if (fx) this.applyNoodleFx(g, ud, fx);
             ud.fx = fx;
             g.getWorldPosition(ud.wp);
-            // hit logic runs relative to the player rig, so AssignPlayerToTrack
-            // camera movement never breaks the hittable window
-            ud.rp.copy(ud.wp);
-            this.playerRig.worldToLocal(ud.rp);
+            // canonical lifetime z: like the real game, hit/miss timing follows
+            // the note's own life span — player movement never despawns notes
+            ud.zt = this.noteZ(n.time, t, ud.speed);
         }
 
         // pass 2: gentle aim assist pulls sabers toward the nearest matching note
         this.applyAimAssist();
 
-        // pass 3: hits and misses (rig-relative positions — the player may have
-        // been moved/rotated by AssignPlayerToTrack, and notes by tracks)
+        // pass 3: hits and misses. Timing windows follow each note's LIFETIME
+        // (world-anchored), exactly like the real game — player/camera movement
+        // can never despawn notes. Whether you can hit one is purely whether
+        // your saber physically reaches it (world-space blade distance).
         for (let i = this.liveNotes.length - 1; i >= 0; i--) {
             const g = this.liveNotes[i];
             const ud = g.userData;
             const n = ud.note;
-            const rz = ud.rp.z;
+            const zt = ud.zt;
             const lifeOver = (t - n.time) / ud.rt;   // >1 = well past despawn
 
             if (ud.decorative) {                     // scenery: never hit, never punish
-                if (lifeOver > 2.5 || (lifeOver > 1.2 && rz > HIT_Z + 2)) {
+                if (lifeOver > 2.5 || (lifeOver > 1.2 && zt > HIT_Z + 2)) {
                     this.removeObj(g); this.liveNotes.splice(i, 1);
                 }
                 continue;
             }
 
-            // animated interactable=false: temporarily unhittable, still no punish
-            const uninteractableNow = ud.fx && ud.fx.interactable && ud.fx.interactable[0] < 0.5;
+            // animated interactable: fully interactable only when >= 1 (Heck spec)
+            const uninteractableNow = ud.fx && ud.fx.interactable && ud.fx.interactable[0] < 1;
 
-            if (!uninteractableNow && rz > HIT_Z - 1.0 && rz < HIT_Z + 1.0) {
+            if (!uninteractableNow && zt > HIT_Z - 1.0 && zt < HIT_Z + 1.0) {
                 const saber = n.color === 0 ? this.saberLeft : this.saberRight;
                 const wrongSaber = n.color === 0 ? this.saberRight : this.saberLeft;
                 if (saber.distanceTo(ud.wp) < 0.6) {
@@ -1183,7 +1230,7 @@ export class Gameplay {
                 }
             }
 
-            if (rz > HIT_Z + 1.3 || (t - n.time) > 0.45) this.miss(g, i);
+            if (zt > HIT_Z + 1.3 || (t - n.time) > 0.45) this.miss(g, i);
         }
     }
 
@@ -1191,19 +1238,19 @@ export class Gameplay {
         if (this.aimAssist <= 0) return;
         for (const saber of [this.saberLeft, this.saberRight]) {
             const want = saber === this.saberLeft ? 0 : 1;
+            const sp = saber.group.getWorldPosition(this._tmpV);
             let best = null, bestD = 1.1;
             for (const g of this.liveNotes) {
                 const ud = g.userData;
                 if (ud.decorative || ud.note.color !== want) continue;
-                if (ud.rp.z < HIT_Z - 1.6 || ud.rp.z > HIT_Z + 1.0) continue;
-                // sabers are rig children, so group.position is rig-space like rp
-                const d = Math.hypot(ud.rp.x - saber.group.position.x, ud.rp.y - saber.group.position.y);
+                if (ud.zt < HIT_Z - 1.6 || ud.zt > HIT_Z + 1.0) continue;
+                const d = Math.hypot(ud.wp.x - sp.x, ud.wp.y - sp.y);
                 if (d < bestD) { bestD = d; best = g; }
             }
             if (best) {
                 const k = this.aimAssist * 0.45 * Math.max(0, 1 - bestD / 1.1);
-                saber.group.position.x += (best.userData.rp.x - saber.group.position.x) * k;
-                saber.group.position.y += (best.userData.rp.y - saber.group.position.y) * k;
+                saber.group.position.x += (best.userData.wp.x - sp.x) * k;
+                saber.group.position.y += (best.userData.wp.y - sp.y) * k;
             }
         }
     }
@@ -1278,7 +1325,11 @@ export class Gameplay {
             const fx = (b.anim || b.track) ? this.tracks.combine(b.anim, b.track, lifeP) : null;
 
             if (fx && fx.definitePosition) {
-                m.position.set(fx.definitePosition[0] * UNIT, fx.definitePosition[1] * UNIT, HIT_Z - fx.definitePosition[2] * UNIT);
+                m.position.set(
+                    ud.x + fx.definitePosition[0] * UNIT,
+                    ud.targetY + fx.definitePosition[1] * UNIT,
+                    HIT_Z - fx.definitePosition[2] * UNIT
+                );
             } else {
                 m.position.set(ud.x, ud.targetY, this.noteZ(b.time, t, ud.speed));
             }
@@ -1286,10 +1337,9 @@ export class Gameplay {
             m.scale.setScalar(1);
             if (fx) this.applyNoodleFx(m, ud, fx);
             m.getWorldPosition(ud.wp);
-            ud.rp.copy(ud.wp);
-            this.playerRig.worldToLocal(ud.rp);
+            const zt = this.noteZ(b.time, t, ud.speed);   // lifetime z
 
-            if (!ud.decorative && ud.rp.z > HIT_Z - 0.8 && ud.rp.z < HIT_Z + 0.8) {
+            if (!ud.decorative && zt > HIT_Z - 0.8 && zt < HIT_Z + 0.8) {
                 const touching = (s) => s.distanceTo(ud.wp) < 0.22 && s.smoothVel.length() > 0.6;
                 if (touching(this.saberLeft) || touching(this.saberRight)) {
                     this.combo = 0;
@@ -1307,7 +1357,7 @@ export class Gameplay {
                 }
             }
             const bLifeOver = (t - b.time) / ud.rt;
-            if (bLifeOver > 2.5 || (bLifeOver > 1.2 && ud.rp.z > HIT_Z + 1.4)) {
+            if (bLifeOver > 2.5 || (bLifeOver > 1.2 && zt > HIT_Z + 1.4)) {
                 this.removeObj(m);
                 this.liveBombs.splice(i, 1);
             }
@@ -1325,10 +1375,10 @@ export class Gameplay {
 
             const headZ = this.noteZ(w.time, t, ud.speed);
             if (fx && fx.definitePosition) {
-                // NE anchors wall definitePosition at the front-bottom-left corner
+                // relative to the wall's lane position per the Heck spec
                 m.position.set(
-                    fx.definitePosition[0] * UNIT + ud.width / 2,
-                    fx.definitePosition[1] * UNIT + ud.height / 2,
+                    ud.x + fx.definitePosition[0] * UNIT,
+                    ud.y + fx.definitePosition[1] * UNIT,
                     HIT_Z - fx.definitePosition[2] * UNIT - ud.length / 2
                 );
             } else {
@@ -1522,15 +1572,16 @@ export class Gameplay {
         this.liveNotes = []; this.liveBombs = []; this.liveWalls = [];
         this.slices = []; this.particles = [];
 
-        // restore camera from the player rig
+        // restore camera from the head rig
         if (this.playerRig) {
             const cam = this.engine.camera;
+            cam.removeFromParent();
             if (this._camHome.parent) this._camHome.parent.add(cam);
-            else { this.playerRig.remove(cam); }
             cam.position.copy(this._camHome.pos);
             cam.quaternion.copy(this._camHome.quat);
             this.scene.remove(this.playerRig);
         }
+        if (this.scene.fog) this.scene.fog.density = this._baseFogDensity;
         this.tracks.destroy();
     }
 }

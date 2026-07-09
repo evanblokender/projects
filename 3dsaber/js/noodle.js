@@ -223,12 +223,14 @@ export class TrackSystem {
         }
 
         // apply track transforms to groups
+        // Per Heck spec, track properties apply to each object INDIVIDUALLY.
+        // Only offsetPosition (translate) and offsetWorldRotation (rotation
+        // about the world origin) are equivalent to group transforms; scale
+        // and localRotation are delivered per-object through combine().
         for (const tr of this.tracks.values()) {
             const v = tr.values;
             if (v.offsetPosition) tr.group.position.set(v.offsetPosition[0] * tr.posScale, v.offsetPosition[1] * tr.posScale, -v.offsetPosition[2] * tr.posScale);
             if (v.rotation) setUnityRotation(tr.group, v.rotation[0], v.rotation[1], v.rotation[2]);
-            if (v.localRotation) setUnityRotation(tr.group, v.localRotation[0], v.localRotation[1], v.localRotation[2]);
-            if (v.scale) tr.group.scale.set(v.scale[0] || 1, v.scale[1] || 1, v.scale[2] || 1);
         }
 
         // player / head / saber movement (AssignPlayerToTrack targets)
@@ -276,8 +278,9 @@ export class TrackSystem {
                     const tr = this.tracks.get(name);
                     if (!tr) continue;
                     if (tr.paths[prop]) addSource(prop, samplePts(tr.paths[prop], lifeP, dims));
-                    if (tr.values[prop] && prop !== 'offsetPosition' && prop !== 'rotation' && prop !== 'localRotation' && prop !== 'scale') {
-                        // transform-ish props already applied via the track group
+                    // offsetPosition/rotation already applied via the track group;
+                    // everything else (incl. scale + localRotation) is per-object
+                    if (tr.values[prop] && prop !== 'offsetPosition' && prop !== 'rotation') {
                         addSource(prop, tr.values[prop]);
                     }
                 }
