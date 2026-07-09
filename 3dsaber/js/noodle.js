@@ -111,8 +111,16 @@ export function samplePts(points, t, dims) {
 
 const PROP_DIMS = {
     offsetPosition: 3, definitePosition: 3, rotation: 3, localRotation: 3,
-    scale: 3, dissolve: 1, dissolveArrow: 1, color: 4, interactable: 1,
+    scale: 3, dissolve: 1, dissolveArrow: 1, color: 4, interactable: 1, time: 1,
+    attenuation: 1, fogOffset: 1, startY: 1, height: 1,
 };
+
+// Unity is left-handed (+z forward); we mirror z, so rotations about
+// x and y flip sign. Unity euler order ZXY (extrinsic) == YXZ intrinsic.
+export function setUnityRotation(target, rx, ry, rz) {
+    target.rotation.order = 'YXZ';
+    target.rotation.set(-rx * DEG, -ry * DEG, rz * DEG);
+}
 const ADDITIVE = { offsetPosition: true, rotation: true, localRotation: true };
 const MULTIPLICATIVE = { scale: true, dissolve: true, dissolveArrow: true };
 
@@ -122,6 +130,7 @@ class Track {
         this.name = name;
         this.values = {};      // static values from AnimateTrack (arrays)
         this.paths = {};       // path animations from AssignPathAnimation (point lists)
+        this.posScale = UNIT;  // noodle grid units for beatmap objects; 1 (meters) for env/player
         this.group = new THREE.Group();
         this.group.name = 'track:' + name;
         root.add(this.group);
@@ -131,10 +140,10 @@ class Track {
 export class TrackSystem {
     /**
      * @param scene THREE.Scene
-     * @param customEvents parsed [{time, duration, type, tracks, easing, props, parent, children}]
-     * @param playerRig THREE.Group|null — camera rig for AssignPlayerToTrack
+     * @param customEvents parsed [{time, duration, type, tracks, target, easing, props, parent, children}]
+     * @param rigs {Root, Head, LeftHand, RightHand} THREE.Groups (or a single Group = Root)
      */
-    constructor(scene, customEvents = [], playerRig = null) {
+    constructor(scene, customEvents = [], rigs = null) {
         this.scene = scene;
         this.root = new THREE.Group();
         this.root.name = 'noodle-tracks';
@@ -143,8 +152,9 @@ export class TrackSystem {
         this.events = [...customEvents].sort((a, b) => a.time - b.time);
         this.evIdx = 0;
         this.active = [];               // running AnimateTracks
-        this.playerRig = playerRig;
-        this.playerTrackName = null;
+        this.rigs = (rigs && rigs.isObject3D) ? { Root: rigs } : (rigs || {});
+        this.playerTargets = {};        // Root/Head/LeftHand/RightHand -> track name
+        this.fogTrackName = null;
     }
 
     track(name) {
@@ -159,7 +169,7 @@ export class TrackSystem {
     }
 
     _start(ev) {
-        if (ev.type === 'AnimateTrack') {
+        if (ev.type === 'AnimateTrack' || ev.type === 'AnimateComponent') {
             for (const name of ev.tracks) {
                 const tr = this.track(name);
                 if (ev.duration <= 0.001) {
@@ -182,7 +192,14 @@ export class TrackSystem {
                 parent.group.add(this.track(child).group);
             }
         } else if (ev.type === 'AssignPlayerToTrack') {
-            this.playerTrackName = ev.tracks[0] || null;
+            const name = ev.tracks[0] || null;
+            if (name) {
+                const target = ev.target || 'Root';
+                this.playerTargets[target] = name;
+                this.track(name).posScale = 1;   // player transforms are in meters
+            }
+        } else if (ev.type === 'AssignFogTrack') {
+            this.fogTrackName = ev.tracks[0] || null;
         }
     }
 
@@ -194,8 +211,9 @@ export class TrackSystem {
         for (let i = this.active.length - 1; i >= 0; i--) {
             const a = this.active[i];
             let p = (t - a.ev.time) / a.ev.duration;
-            const done = p >= 1;
-            p = Math.min(Math.max(p, 0), 1);
+            const loops = 1 + (a.ev.repeat || 0);
+            const done = p >= loops;
+            p = done ? 1 : Math.max(p, 0) % 1;           // repeat wraps each loop
             const ep = ease(a.ev.easing, p);
             for (const prop in a.ev.props) {
                 const v = samplePts(a.ev.props[prop], ep, PROP_DIMS[prop] || 1);
@@ -207,19 +225,35 @@ export class TrackSystem {
         // apply track transforms to groups
         for (const tr of this.tracks.values()) {
             const v = tr.values;
-            if (v.offsetPosition) tr.group.position.set(v.offsetPosition[0] * UNIT, v.offsetPosition[1] * UNIT, -v.offsetPosition[2] * UNIT);
-            if (v.rotation) tr.group.rotation.set(v.rotation[0] * DEG, -v.rotation[1] * DEG, v.rotation[2] * DEG);
-            if (v.localRotation) tr.group.rotation.set(v.localRotation[0] * DEG, -v.localRotation[1] * DEG, v.localRotation[2] * DEG);
+            if (v.offsetPosition) tr.group.position.set(v.offsetPosition[0] * tr.posScale, v.offsetPosition[1] * tr.posScale, -v.offsetPosition[2] * tr.posScale);
+            if (v.rotation) setUnityRotation(tr.group, v.rotation[0], v.rotation[1], v.rotation[2]);
+            if (v.localRotation) setUnityRotation(tr.group, v.localRotation[0], v.localRotation[1], v.localRotation[2]);
             if (v.scale) tr.group.scale.set(v.scale[0] || 1, v.scale[1] || 1, v.scale[2] || 1);
         }
 
-        // player movement
-        if (this.playerRig && this.playerTrackName) {
-            const v = this.track(this.playerTrackName).values;
-            if (v.offsetPosition) this.playerRig.position.set(v.offsetPosition[0] * UNIT, v.offsetPosition[1] * UNIT, -v.offsetPosition[2] * UNIT);
-            if (v.rotation) this.playerRig.rotation.set(v.rotation[0] * DEG, -v.rotation[1] * DEG, v.rotation[2] * DEG);
-            if (v.localRotation) this.playerRig.rotation.set(v.localRotation[0] * DEG, -v.localRotation[1] * DEG, v.localRotation[2] * DEG);
+        // player / head / saber movement (AssignPlayerToTrack targets)
+        for (const target in this.playerTargets) {
+            const rig = this.rigs[target];
+            if (!rig) continue;
+            const tr = this.track(this.playerTargets[target]);
+            const v = tr.values;
+            const s = tr.posScale;
+            if (v.offsetPosition) rig.position.set(v.offsetPosition[0] * s, v.offsetPosition[1] * s, -v.offsetPosition[2] * s);
+            if (v.rotation) setUnityRotation(rig, v.rotation[0], v.rotation[1], v.rotation[2]);
+            if (v.localRotation) setUnityRotation(rig, v.localRotation[0], v.localRotation[1], v.localRotation[2]);
         }
+    }
+
+    // latest fog values (Chroma AssignFogTrack / AnimateComponent)
+    fogValues() {
+        if (this.fogTrackName) {
+            const v = this.track(this.fogTrackName).values;
+            if (v.attenuation !== undefined || v.startY !== undefined || v.height !== undefined) return v;
+        }
+        for (const tr of this.tracks.values()) {
+            if (tr.values.attenuation !== undefined) return tr.values;
+        }
+        return null;
     }
 
     // Combine an object's own animation with its tracks' path animations and
@@ -233,7 +267,7 @@ export class TrackSystem {
             else if (MULTIPLICATIVE[prop]) for (let d = 0; d < v.length; d++) out[prop][d] *= v[d];
             else out[prop] = v;
         };
-        const props = ['offsetPosition', 'definitePosition', 'rotation', 'localRotation', 'scale', 'dissolve', 'dissolveArrow', 'color'];
+        const props = ['offsetPosition', 'definitePosition', 'rotation', 'localRotation', 'scale', 'dissolve', 'dissolveArrow', 'color', 'interactable', 'time'];
         for (const prop of props) {
             const dims = PROP_DIMS[prop];
             if (objAnim && objAnim[prop]) addSource(prop, samplePts(objAnim[prop], lifeP, dims));
@@ -254,11 +288,14 @@ export class TrackSystem {
 
     destroy() {
         this.scene.remove(this.root);
-        if (this.playerRig) {
-            this.playerRig.position.set(0, 0, 0);
-            this.playerRig.rotation.set(0, 0, 0);
+        for (const target in this.rigs) {
+            const rig = this.rigs[target];
+            if (!rig) continue;
+            rig.position.set(0, 0, 0);
+            rig.rotation.set(0, 0, 0);
         }
         this.tracks.clear();
         this.active = [];
+        this.playerTargets = {};
     }
 }

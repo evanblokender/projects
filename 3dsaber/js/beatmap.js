@@ -35,6 +35,11 @@ const PROP_ALIASES = {
     dissolveArrow: ['dissolveArrow', '_dissolveArrow'],
     color: ['color', '_color'],
     interactable: ['interactable', '_interactable'],
+    time: ['time', '_time'],
+    attenuation: ['attenuation', '_attenuation'],
+    fogOffset: ['offset', '_offset'],
+    startY: ['startY', '_startY'],
+    height: ['height', '_height'],
 };
 
 function resolvePts(v, defs) {
@@ -72,14 +77,72 @@ function normWorldRot(r) {
     return null;
 }
 
+// Chroma environment enhancements: geometry objects ("custom models").
+// ID/regex lookups target base-game objects we don't have, so only
+// geometry-based entries are returned (that's what model maps use).
+function parseEnvironment(cd, v2) {
+    const list = (v2 ? cd._environment : cd.environment) || [];
+    const mats = (v2 ? cd._materials : cd.materials) || {};
+    const out = [];
+    for (const e of list) {
+        const geo = v2 ? e._geometry : e.geometry;
+        if (!geo) continue;
+        let m = v2 ? geo._material : geo.material;
+        if (typeof m === 'string') m = mats[m];
+        m = m || {};
+        out.push({
+            type: (v2 ? geo._type : geo.type) || 'Cube',
+            shader: (v2 ? m._shader : m.shader) || 'Standard',
+            color: normColor(v2 ? m._color : m.color),
+            position: (v2 ? e._position : e.position) || null,
+            rotation: (v2 ? e._rotation : e.rotation) || null,
+            localPosition: (v2 ? e._localPosition : e.localPosition) || null,
+            localRotation: (v2 ? e._localRotation : e.localRotation) || null,
+            scale: (v2 ? e._scale : e.scale) || null,
+            track: normTrack(v2 ? e._track : e.track),
+        });
+    }
+    return out;
+}
+
+// Chroma v2 light gradient on an event
+function parseGradient(g, clock, beat) {
+    if (!g) return null;
+    const start = normColor(g._startColor);
+    const end = normColor(g._endColor);
+    if (!start || !end) return null;
+    return {
+        start, end,
+        duration: Math.max(0.01, clock.toSeconds(beat + (g._duration || 0)) - clock.toSeconds(beat)),
+        easing: g._easing || null,
+    };
+}
+
+// Chroma ring/laser event extras
+function parseEventCustom(cd, v2) {
+    if (!cd) return null;
+    const pick = (a, b) => (v2 ? cd[a] : cd[b]);
+    const custom = {
+        rotation: pick('_rotation', 'rotation') ?? null,
+        step: pick('_step', 'step') ?? null,
+        prop: pick('_prop', 'prop') ?? null,
+        speed: pick('_speed', 'speed') ?? null,
+        direction: pick('_direction', 'direction') ?? null,
+    };
+    return (custom.rotation !== null || custom.step !== null || custom.speed !== null ||
+            custom.direction !== null || custom.prop !== null) ? custom : null;
+}
+
 // Point definitions: v2 [{_name,_points}], v3 {name: points}
 function parsePointDefs(cd, v2) {
     const defs = {};
     if (!cd) return defs;
     if (v2 && Array.isArray(cd._pointDefinitions)) {
         for (const d of cd._pointDefinitions) if (d._name) defs[d._name] = d._points;
+    } else if (Array.isArray(cd.pointDefinitions)) {          // v3.0 – v3.2 array form
+        for (const d of cd.pointDefinitions) if (d.name) defs[d.name] = d.points;
     } else if (cd.pointDefinitions && typeof cd.pointDefinitions === 'object') {
-        Object.assign(defs, cd.pointDefinitions);
+        Object.assign(defs, cd.pointDefinitions);             // v3.3+ object form
     }
     return defs;
 }
@@ -100,7 +163,9 @@ function parseCustomEvents(list, clock, defs, v2) {
             duration: Math.max(0, clock.toSeconds(beat + durBeats) - time),
             type,
             easing: (v2 ? d._easing : d.easing) || null,
+            repeat: (v2 ? d._repeat : d.repeat) || 0,
             tracks: normTrack(v2 ? d._track : d.track) || [],
+            target: (v2 ? d._target : d.target) || null,   // Root/Head/LeftHand/RightHand
             props: {},
             parent: null,
             children: null,
@@ -109,6 +174,16 @@ function parseCustomEvents(list, clock, defs, v2) {
         if (type === 'AssignTrackParent') {
             parsed.parent = String((v2 ? d._parentTrack : d.parentTrack) ?? '');
             parsed.children = (normTrack(v2 ? d._childrenTracks : d.childrenTracks) || []);
+        } else if (type === 'AnimateComponent') {
+            // Chroma v3: animate fog via BloomFogEnvironment component
+            const comp = (v2 ? d._components : d.components) || {};
+            const fog = comp.BloomFogEnvironment || comp._BloomFogEnvironment || {};
+            const props = {};
+            for (const k of ['attenuation', 'offset', 'startY', 'height']) {
+                const pts = resolvePts(fog[k], defs);
+                if (pts) props[k === 'offset' ? 'fogOffset' : k] = pts;
+            }
+            parsed.props = props;
         } else {
             const anim = normAnim(d, defs);
             if (anim) parsed.props = anim;
@@ -326,11 +401,14 @@ function parseV2(map, baseBpm) {
             value: ev._value,
             float: ev._floatValue ?? 1,
             chroma: normColor(cd._color),
+            gradient: parseGradient(cd._lightGradient, clock, ev._time),
+            custom: parseEventCustom(ev._customData, true),
         });
     }
 
     const customEvents = parseCustomEvents(mapCd._customEvents, clock, defs, true);
-    return finish({ notes, bombs, walls, events, customEvents, clock });
+    const environment = parseEnvironment(mapCd, true);
+    return finish({ notes, bombs, walls, events, customEvents, environment, clock });
 }
 
 // --- v3 ---
@@ -417,11 +495,14 @@ function parseV3(map, baseBpm) {
             value: ev.i,
             float: ev.f ?? 1,
             chroma: normColor(cd.color),
+            gradient: null,
+            custom: parseEventCustom(ev.customData, false),
         };
     });
 
     const customEvents = parseCustomEvents(mapCd.customEvents, clock, defs, false);
-    return finish({ notes, bombs, walls, events, customEvents, clock });
+    const environment = parseEnvironment(mapCd, false);
+    return finish({ notes, bombs, walls, events, customEvents, environment, clock });
 }
 
 // --- v4 (split object/metadata arrays; lighting lives in the lightshow file) ---
@@ -481,7 +562,7 @@ function parseV4(map, baseBpm, lightshowJson) {
         } catch (e) { /* lightshow optional */ }
     }
 
-    return finish({ notes, bombs, walls, events, customEvents: [], clock });
+    return finish({ notes, bombs, walls, events, customEvents: [], environment: [], clock });
 }
 
 function finish(data) {
@@ -490,6 +571,7 @@ function finish(data) {
     data.walls.sort((a, b) => a.time - b.time);
     data.events.sort((a, b) => a.time - b.time);
     data.customEvents.sort((a, b) => a.time - b.time);
+    if (!data.environment) data.environment = [];
     return data;
 }
 

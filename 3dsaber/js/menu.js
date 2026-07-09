@@ -584,6 +584,7 @@ export class Menu {
         color('rightColor', 'Right Saber Color', 'Also tints right-hand notes');
         toggle('noFail', 'No Fail', 'Never fail a song — chill mode', null);
         toggle('bloom', 'Glow / Bloom', 'Fancy graphics. Turn off on slow devices', (v) => this.engine.setBloom(v));
+        toggle('wallDistortion', 'Wall Distortion', 'Real-time energy-field effect on walls', null);
         slider('bloomStrength', 'Glow Intensity', 'How strong the bloom glow is', 0, 1.2, 0.05, (v) => v.toFixed(2));
     }
 }

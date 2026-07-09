@@ -4,8 +4,9 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { DIR_VECTORS, reactionTime } from './beatmap.js';
-import { TrackSystem, UNIT } from './noodle.js';
+import { TrackSystem, UNIT, setUnityRotation } from './noodle.js';
 import { audio } from './audio.js';
 import { gamepad } from './input.js';
 import { settings } from './settings.js';
@@ -71,6 +72,79 @@ function makeDotTexture() {
     return t;
 }
 
+// ---------- Wall distortion shader (real-time energy-field look) ----------
+const WALL_VERT = /* glsl */`
+varying vec3 vWorldPos;
+varying vec3 vNormal;
+void main() {
+    vec4 wp = modelMatrix * vec4(position, 1.0);
+    vWorldPos = wp.xyz;
+    vNormal = normalize(mat3(modelMatrix) * normal);
+    gl_Position = projectionMatrix * viewMatrix * wp;
+}`;
+
+const WALL_FRAG = /* glsl */`
+uniform vec3 uColor;
+uniform float uOpacity;
+uniform float uTime;
+uniform sampler2D uScene;
+uniform vec2 uResolution;
+varying vec3 vWorldPos;
+varying vec3 vNormal;
+
+float hash(vec3 p) {
+    p = fract(p * 0.3183099 + vec3(0.1, 0.2, 0.3));
+    p *= 17.0;
+    return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
+}
+float noise(vec3 x) {
+    vec3 i = floor(x); vec3 f = fract(x);
+    f = f * f * (3.0 - 2.0 * f);
+    return mix(mix(mix(hash(i), hash(i + vec3(1,0,0)), f.x),
+                   mix(hash(i + vec3(0,1,0)), hash(i + vec3(1,1,0)), f.x), f.y),
+               mix(mix(hash(i + vec3(0,0,1)), hash(i + vec3(1,0,1)), f.x),
+                   mix(hash(i + vec3(0,1,1)), hash(i + vec3(1,1,1)), f.x), f.y), f.z);
+}
+
+void main() {
+    vec3 viewDir = normalize(cameraPosition - vWorldPos);
+    float fres = pow(1.0 - abs(dot(viewDir, normalize(vNormal))), 2.0);
+    // two layers of drifting noise drive the warp
+    float n1 = noise(vWorldPos * 1.6 + vec3(0.0, uTime * 0.5, uTime * 1.2));
+    float n2 = noise(vWorldPos * 3.8 - vec3(uTime * 0.9, 0.0, uTime * 0.6));
+    // screen-space refraction: sample and warp whatever is BEHIND the wall
+    vec2 suv = gl_FragCoord.xy / uResolution;
+    vec2 warp = vec2(n1 - 0.5, n2 - 0.5) * (0.05 + fres * 0.035);
+    vec3 refr = texture2D(uScene, clamp(suv + warp, vec2(0.002), vec2(0.998))).rgb;
+    float swirl = 0.5 + 0.5 * sin(6.28318 * (n1 + n2 * 0.5) + uTime * 0.7);
+    vec3 col = refr * (0.82 + swirl * 0.12) + uColor * (0.10 + fres * 0.5 + swirl * 0.08);
+    float alpha = uOpacity * clamp(0.88 + fres * 0.12, 0.0, 1.0);
+    gl_FragColor = vec4(col, alpha);
+}`;
+
+function makeWallMaterial(color, distortion, engine) {
+    if (!distortion || !engine || !engine.refractionRT) {
+        return new THREE.MeshBasicMaterial({
+            color, transparent: true, opacity: 0.16, depthWrite: false,
+            blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+        });
+    }
+    return new THREE.ShaderMaterial({
+        uniforms: {
+            uColor: { value: color.clone() },
+            uOpacity: { value: 1.0 },              // dissolve factor
+            uTime: { value: 0 },
+            uScene: { value: engine.refractionRT.texture },
+            uResolution: { value: engine.resolution },
+        },
+        vertexShader: WALL_VERT,
+        fragmentShader: WALL_FRAG,
+        transparent: true,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+    });
+}
+
 // ---------- Light group (responds to beatmap lighting events) ----------
 class LightGroup {
     constructor(materials, baseIntensity = 2.2) {
@@ -82,7 +156,17 @@ class LightGroup {
         this.base = baseIntensity;
     }
 
-    trigger(value, float = 1, chromaColor = null) {
+    trigger(value, float = 1, chromaColor = null, gradient = null) {
+        if (gradient) {                        // Chroma light gradient
+            this.grad = {
+                start: new THREE.Color(gradient.start[0], gradient.start[1], gradient.start[2]),
+                end: new THREE.Color(gradient.end[0], gradient.end[1], gradient.end[2]),
+                dur: gradient.duration, age: 0,
+            };
+            chromaColor = gradient.start;
+        } else {
+            this.grad = null;
+        }
         let col = null, mode = 'off';
         if (value === 0) { mode = 'off'; }
         else if (value <= 4) { col = new THREE.Color(0x2d7dff); mode = ['on', 'flash', 'fade', 'on'][(value - 1) % 4]; }
@@ -103,6 +187,12 @@ class LightGroup {
         if (this.decay > 0 && this.level !== this.target) {
             this.level += (this.target - this.level) * Math.min(1, this.decay * dt * 3);
             if (Math.abs(this.level - this.target) < 0.01) this.level = this.target;
+        }
+        if (this.grad) {                       // gradient sweep
+            this.grad.age += dt;
+            const f = Math.min(1, this.grad.age / this.grad.dur);
+            this.color.lerpColors(this.grad.start, this.grad.end, f);
+            if (f >= 1) this.grad = null;
         }
         const intensity = this.level * this.base;
         for (const m of this.materials) {
@@ -136,6 +226,14 @@ export class Engine {
         this.composer.addPass(this.bloom);
         this.composer.addPass(new OutputPass());
 
+        // Half-res scene capture for refractive walls (they warp what's behind them)
+        const dbs = this.renderer.getDrawingBufferSize(new THREE.Vector2());
+        this.resolution = dbs.clone();
+        this.refractionRT = new THREE.WebGLRenderTarget(
+            Math.max(2, dbs.x >> 1), Math.max(2, dbs.y >> 1),
+            { minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter }
+        );
+
         this.arrowTex = makeArrowTexture();
         this.dotTex = makeDotTexture();
         this.clockTime = performance.now() / 1000;
@@ -151,6 +249,9 @@ export class Engine {
         this.camera.updateProjectionMatrix();
         this.renderer.setSize(innerWidth, innerHeight);
         this.composer.setSize(innerWidth, innerHeight);
+        const dbs = this.renderer.getDrawingBufferSize(new THREE.Vector2());
+        this.resolution.copy(dbs);
+        this.refractionRT.setSize(Math.max(2, dbs.x >> 1), Math.max(2, dbs.y >> 1));
     }
 
     buildEnvironment() {
@@ -264,18 +365,32 @@ export class Engine {
 
     handleEvent(ev) {
         const g = this.lightGroups[ev.type];
-        if (g) { g.trigger(ev.value, ev.float, ev.chroma); return; }
-        if (ev.type === 8) {                       // ring spin
-            for (const ring of this.rings) {
-                ring.userData.spinTarget += (Math.random() - 0.5) * 1.6;
+        if (g) { g.trigger(ev.value, ev.float, ev.chroma, ev.gradient); return; }
+        const c = ev.custom || null;
+        if (ev.type === 8) {                       // ring spin (Chroma: precise rotation/step)
+            if (c && (c.rotation !== null || c.step !== null)) {
+                const dir = c.direction === 0 ? 1 : c.direction === 1 ? -1 : (Math.random() < 0.5 ? 1 : -1);
+                const rot = THREE.MathUtils.degToRad(c.rotation ?? 45) * dir;
+                const step = THREE.MathUtils.degToRad(c.step ?? 0) * dir;
+                this.rings.forEach((ring, i) => { ring.userData.spinTarget += rot + step * i; });
+            } else {
+                for (const ring of this.rings) {
+                    ring.userData.spinTarget += (Math.random() - 0.5) * 1.6;
+                }
             }
-        } else if (ev.type === 9) {                // ring zoom
-            const zoomed = this.rings[0].userData.zoomOffset === 0;
-            this.rings.forEach((ring, i) => { ring.userData.zoomOffset = zoomed ? i * 3.2 : 0; });
+        } else if (ev.type === 9) {                // ring zoom (Chroma: step = spacing)
+            if (c && c.step !== null) {
+                this.rings.forEach((ring, i) => { ring.userData.zoomOffset = c.step * i; });
+            } else {
+                const zoomed = this.rings[0].userData.zoomOffset === 0;
+                this.rings.forEach((ring, i) => { ring.userData.zoomOffset = zoomed ? i * 3.2 : 0; });
+            }
         } else if (ev.type === 12) {
-            this.laserSpeed.left = 0.25 + ev.value * 0.28;
+            const speed = c && c.speed !== null ? c.speed : ev.value;
+            this.laserSpeed.left = 0.25 + speed * 0.28;
         } else if (ev.type === 13) {
-            this.laserSpeed.right = 0.25 + ev.value * 0.28;
+            const speed = c && c.speed !== null ? c.speed : ev.value;
+            this.laserSpeed.right = 0.25 + speed * 0.28;
         }
     }
 
@@ -325,6 +440,23 @@ export class Engine {
             this.updateAttract(dt, now);
         }
         this.updateEnvironment(dt, now);
+
+        // Refraction pre-pass: capture the scene without distortion walls so
+        // the wall shader can warp what's behind them (like the real game).
+        if (this.gameplay && this.gameplay.liveWalls) {
+            const dWalls = [];
+            for (const w of this.gameplay.liveWalls) {
+                if (w.userData.mat && w.userData.mat.isShaderMaterial && w.visible) dWalls.push(w);
+            }
+            if (dWalls.length) {
+                for (const w of dWalls) w.visible = false;
+                this.renderer.setRenderTarget(this.refractionRT);
+                this.renderer.render(this.scene, this.camera);
+                this.renderer.setRenderTarget(null);
+                for (const w of dWalls) w.visible = true;
+            }
+        }
+
         this.composer.render();
         return dt;
     }
@@ -524,19 +656,42 @@ export class Gameplay {
         this.saberLeft = new Saber(this.scene, settings.get('leftColor'), -0.55);
         this.saberRight = new Saber(this.scene, settings.get('rightColor'), 0.55);
 
-        // Noodle track system + player rig (AssignPlayerToTrack moves the camera)
+        // Noodle player rigs: Root moves everything; Head moves the camera;
+        // LeftHand/RightHand move the sabers (AssignPlayerToTrack targets).
         this.playerRig = new THREE.Group();
+        this.headRig = new THREE.Group();
+        this.leftHandRig = new THREE.Group();
+        this.rightHandRig = new THREE.Group();
+        this.playerRig.add(this.headRig, this.leftHandRig, this.rightHandRig);
         this.scene.add(this.playerRig);
         this._camHome = {
             pos: engine.camera.position.clone(),
             quat: engine.camera.quaternion.clone(),
             parent: engine.camera.parent,
         };
-        this.playerRig.add(engine.camera);
-        this.playerRig.add(this.saberLeft.group);      // sabers travel with the player
-        this.playerRig.add(this.saberRight.group);
-        this.tracks = new TrackSystem(this.scene, mapData.customEvents || [], this.playerRig);
+        this.headRig.add(engine.camera);
+        this.leftHandRig.add(this.saberLeft.group);    // sabers travel with the player
+        this.rightHandRig.add(this.saberRight.group);
+        this.tracks = new TrackSystem(this.scene, mapData.customEvents || [], {
+            Root: this.playerRig,
+            Head: this.headRig,
+            LeftHand: this.leftHandRig,
+            RightHand: this.rightHandRig,
+        });
         this._tmpV = new THREE.Vector3();
+        this._baseFogDensity = this.scene.fog ? this.scene.fog.density : 0.028;
+
+        // Spawn queues sorted by SPAWN time (not hit time) so Noodle objects with
+        // large spawn offsets appear exactly when they should, never late.
+        const bySpawn = (arr) => arr
+            .map(o => ({ o, at: o.time - this.noteRt(o) }))
+            .sort((a, b) => a.at - b.at);
+        this.noteQueue = bySpawn(mapData.notes);
+        this.bombQueue = bySpawn(mapData.bombs);
+        this.wallQueue = bySpawn(mapData.walls);
+
+        // Chroma environment geometry — the "custom models" in model maps
+        this.spawnEnvironment(mapData.environment);
 
         this.noteIdx = 0; this.bombIdx = 0; this.wallIdx = 0; this.eventIdx = 0;
         this.liveNotes = [];
@@ -601,6 +756,118 @@ export class Gameplay {
         return n.x >= -0.6 && n.x <= 3.6 && n.y >= -0.6 && n.y <= 2.9;
     }
 
+    // ----- Chroma environment geometry ("custom models") -----
+    envGeometry(type) {
+        if (!this._envGeoCache) this._envGeoCache = {};
+        const key = String(type);
+        if (!this._envGeoCache[key]) {
+            let g;
+            switch (key) {
+                case 'Sphere':   g = new THREE.SphereGeometry(0.5, 16, 12); break;
+                case 'Capsule':  g = new THREE.CapsuleGeometry(0.5, 1, 4, 12); break;
+                case 'Cylinder': g = new THREE.CylinderGeometry(0.5, 0.5, 1, 16); break;
+                case 'Plane':    g = new THREE.PlaneGeometry(10, 10); break;
+                case 'Quad':     g = new THREE.PlaneGeometry(1, 1); break;
+                case 'Triangle': {
+                    const shape = new THREE.Shape();
+                    shape.moveTo(0, 0.577);
+                    shape.lineTo(-0.5, -0.289);
+                    shape.lineTo(0.5, -0.289);
+                    shape.closePath();
+                    g = new THREE.ShapeGeometry(shape);
+                    break;
+                }
+                default:         g = new THREE.BoxGeometry(1, 1, 1); break; // Cube
+            }
+            this._envGeoCache[key] = g;
+        }
+        return this._envGeoCache[key];
+    }
+
+    envMaterial(shader, colorArr) {
+        if (!this._envMatCache) this._envMatCache = {};
+        const c = colorArr
+            ? new THREE.Color(Math.min(2, colorArr[0]), Math.min(2, colorArr[1]), Math.min(2, colorArr[2]))
+            : new THREE.Color(0x8899bb);
+        const key = shader + '|' + c.getHexString();
+        if (!this._envMatCache[key]) {
+            let m;
+            if (/OpaqueLight/i.test(shader)) {
+                m = new THREE.MeshStandardMaterial({
+                    color: c.clone().multiplyScalar(0.15), emissive: c, emissiveIntensity: 1.6,
+                });
+            } else if (/TransparentLight|BillieWater|Water/i.test(shader)) {
+                m = new THREE.MeshBasicMaterial({
+                    color: c, transparent: true, opacity: 0.5,
+                    blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
+                });
+            } else {           // Standard / BTSPillar / InterscopeConcrete / etc.
+                m = new THREE.MeshStandardMaterial({ color: c, roughness: 0.45, metalness: 0.35 });
+            }
+            this._envMatCache[key] = m;
+        }
+        return this._envMatCache[key];
+    }
+
+    _envTransform(target, e) {
+        const pos = e.position || e.localPosition || [0, 0, 0];
+        // Chroma env positions are Unity meters, +z forward → our -z
+        target.position.set(pos[0] || 0, pos[1] || 0, -(pos[2] || 0));
+        const rot = e.rotation || e.localRotation || [0, 0, 0];
+        target.rotation.set(
+            THREE.MathUtils.degToRad(rot[0] || 0),
+            -THREE.MathUtils.degToRad(rot[1] || 0),
+            THREE.MathUtils.degToRad(rot[2] || 0)
+        );
+        const sc = e.scale || [1, 1, 1];
+        target.scale.set(sc[0] || 0.0001, sc[1] || 0.0001, sc[2] || 0.0001);
+    }
+
+    spawnEnvironment(list) {
+        this.envMeshes = [];
+        if (!list || !list.length) return;
+
+        // No cap — model maps need every piece. Static (untracked) geometry is
+        // merged per material into single draw calls so huge models stay fast.
+        const staticBuckets = new Map();   // matKey -> {material, geometries[]}
+        const helper = new THREE.Object3D();
+
+        for (const e of list) {
+            const material = this.envMaterial(e.shader, e.color);
+            if (e.track && e.track.length) {
+                // animated pieces stay individual so their track can move them
+                const mesh = new THREE.Mesh(this.envGeometry(e.type), material);
+                this._envTransform(mesh, e);
+                this.tracks.containerFor(e.track).add(mesh);
+                this.envMeshes.push(mesh);
+            } else {
+                this._envTransform(helper, e);
+                helper.updateMatrix();
+                const geo = this.envGeometry(e.type).clone().applyMatrix4(helper.matrix);
+                const key = material.uuid;
+                if (!staticBuckets.has(key)) staticBuckets.set(key, { material, geometries: [] });
+                staticBuckets.get(key).geometries.push(geo);
+            }
+        }
+
+        for (const { material, geometries } of staticBuckets.values()) {
+            try {
+                const merged = mergeGeometries(geometries, false);
+                if (!merged) throw new Error('merge failed');
+                const mesh = new THREE.Mesh(merged, material);
+                this.scene.add(mesh);
+                this.envMeshes.push(mesh);
+            } catch (err) {
+                // merge can fail on exotic attribute sets — fall back to individual meshes
+                for (const geo of geometries) {
+                    const mesh = new THREE.Mesh(geo, material);
+                    this.scene.add(mesh);
+                    this.envMeshes.push(mesh);
+                }
+            }
+        }
+    }
+
     // Wrap an object so world rotation + tracks compose correctly, and attach
     // it to its track's group (or the scene).
     attachObject(group, obj) {
@@ -656,6 +923,7 @@ export class Gameplay {
             rt: this.noteRt(n),
             decorative: n.decorative || (!n.anim && !this.isReachable(n)),
             wp: new THREE.Vector3(),
+            rp: new THREE.Vector3(),
         };
         if (n.localRot) {
             group.userData.localRot = new THREE.Euler(
@@ -680,22 +948,21 @@ export class Gameplay {
             speed: this.noteSpeed(b), rt: this.noteRt(b),
             decorative: !!b.decorative,
             wp: new THREE.Vector3(),
+            rp: new THREE.Vector3(),
         };
         mesh.userData.wrapper = this.attachObject(mesh, b);
         this.liveBombs.push(mesh);
     }
 
     spawnWall(w) {
-        const width = Math.min(8, Math.max(0.15, w.w)) * COL_STEP;
-        const height = Math.min(8, Math.max(0.15, w.h)) * LAYER_STEP;
-        const length = Math.max(0.3, w.duration * this.noteSpeed(w));
+        // Wall art uses huge/tiny/negative sizes — preserve them, just keep sane bounds
+        const width = Math.min(60, Math.max(0.03, Math.abs(w.w))) * COL_STEP;
+        const height = Math.min(60, Math.max(0.03, Math.abs(w.h))) * LAYER_STEP;
+        const length = Math.min(300, Math.max(0.05, w.duration * this.noteSpeed(w)));
         const color = w.chroma
             ? new THREE.Color(Math.min(1, w.chroma[0]), Math.min(1, w.chroma[1]), Math.min(1, w.chroma[2]))
             : new THREE.Color(0xff2d55);
-        const mat = new THREE.MeshBasicMaterial({
-            color, transparent: true, opacity: 0.16, depthWrite: false,
-            blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
-        });
+        const mat = makeWallMaterial(color, settings.get('wallDistortion'), this.engine);
         const mesh = new THREE.Mesh(new THREE.BoxGeometry(width, height, length), mat);
         const edge = new THREE.LineSegments(
             new THREE.EdgesGeometry(mesh.geometry),
@@ -704,9 +971,10 @@ export class Gameplay {
         mesh.add(edge);
         mesh.userData = {
             wall: w,
-            x: colX(w.x) + (w.w - 1) * COL_STEP / 2,
-            y: 0.35 + w.y * LAYER_STEP + height / 2,
-            length,
+            // left edge at column x, extending `w.w` columns (negative w extends left)
+            x: colX(w.x) - COL_STEP / 2 + (w.w * COL_STEP) / 2,
+            y: 0.1 + w.y * LAYER_STEP + (w.h >= 0 ? height : -height) / 2,
+            width, height, length,
             mat,
             edgeMat: edge.material,
             speed: this.noteSpeed(w),
@@ -714,6 +982,7 @@ export class Gameplay {
             decorative: !!w.decorative,
             baseOpacity: 0.16,
             wp: new THREE.Vector3(),
+            rp: new THREE.Vector3(),
         };
         if (w.localRot) {
             mesh.rotation.set(
@@ -758,24 +1027,15 @@ export class Gameplay {
         this.saberLeft.move(gamepad.leftStick, dt);
         this.saberRight.move(gamepad.rightStick, dt);
 
-        // spawn objects entering the reaction window (per-note for Noodle offsets)
-        while (this.noteIdx < this.map.notes.length) {
-            const n = this.map.notes[this.noteIdx];
-            if (n.time - t >= this.noteRt(n)) break;
-            this.spawnNote(n);
-            this.noteIdx++;
+        // spawn objects whose spawn time has arrived (queues pre-sorted by spawn time)
+        while (this.noteIdx < this.noteQueue.length && this.noteQueue[this.noteIdx].at <= t) {
+            this.spawnNote(this.noteQueue[this.noteIdx++].o);
         }
-        while (this.bombIdx < this.map.bombs.length) {
-            const b = this.map.bombs[this.bombIdx];
-            if (b.time - t >= this.noteRt(b)) break;
-            this.spawnBomb(b);
-            this.bombIdx++;
+        while (this.bombIdx < this.bombQueue.length && this.bombQueue[this.bombIdx].at <= t) {
+            this.spawnBomb(this.bombQueue[this.bombIdx++].o);
         }
-        while (this.wallIdx < this.map.walls.length) {
-            const w = this.map.walls[this.wallIdx];
-            if (w.time - t >= this.noteRt(w)) break;
-            this.spawnWall(w);
-            this.wallIdx++;
+        while (this.wallIdx < this.wallQueue.length && this.wallQueue[this.wallIdx].at <= t) {
+            this.spawnWall(this.wallQueue[this.wallIdx++].o);
         }
         while (this.eventIdx < this.map.events.length && this.map.events[this.eventIdx].time <= t) {
             this.engine.handleEvent(this.map.events[this.eventIdx++]);
@@ -829,7 +1089,7 @@ export class Gameplay {
         if (fx.dissolveArrow !== undefined && ud.faceMat) {
             ud.faceMat.opacity = THREE.MathUtils.clamp(fx.dissolveArrow[0], 0, 1);
         }
-        if (fx.color && ud.mat) {
+        if (fx.color && ud.mat && ud.mat.color) {   // shader walls sync uniforms separately
             ud.mat.color.setRGB(Math.min(1, fx.color[0]), Math.min(1, fx.color[1]), Math.min(1, fx.color[2]));
             if (ud.mat.emissive) ud.mat.emissive.copy(ud.mat.color);
             if (fx.color[3] !== undefined && ud.mat.transparent) {
@@ -858,7 +1118,13 @@ export class Gameplay {
                 if (ud.localRot) g.rotation.copy(ud.localRot);
                 g.scale.setScalar(1);
             } else {
-                const z = this.noteZ(n.time, t, ud.speed);
+                // Noodle "time" property remaps the note's own life progress
+                let z;
+                if (fx && fx.time) {
+                    z = HIT_Z - (0.5 - fx.time[0]) * 2 * ud.rt * ud.speed;
+                } else {
+                    z = this.noteZ(n.time, t, ud.speed);
+                }
                 g.position.set(ud.x, 0, z);
                 const rise = THREE.MathUtils.clamp(p / 0.4, 0, 1);
                 const easedRise = 1 - Math.pow(1 - rise, 3);
@@ -873,28 +1139,37 @@ export class Gameplay {
             }
 
             if (fx) this.applyNoodleFx(g, ud, fx);
+            ud.fx = fx;
             g.getWorldPosition(ud.wp);
+            // hit logic runs relative to the player rig, so AssignPlayerToTrack
+            // camera movement never breaks the hittable window
+            ud.rp.copy(ud.wp);
+            this.playerRig.worldToLocal(ud.rp);
         }
 
         // pass 2: gentle aim assist pulls sabers toward the nearest matching note
         this.applyAimAssist();
 
-        // pass 3: hits and misses (world positions — tracks may have moved things)
+        // pass 3: hits and misses (rig-relative positions — the player may have
+        // been moved/rotated by AssignPlayerToTrack, and notes by tracks)
         for (let i = this.liveNotes.length - 1; i >= 0; i--) {
             const g = this.liveNotes[i];
             const ud = g.userData;
             const n = ud.note;
-            const wz = ud.wp.z;
+            const rz = ud.rp.z;
             const lifeOver = (t - n.time) / ud.rt;   // >1 = well past despawn
 
             if (ud.decorative) {                     // scenery: never hit, never punish
-                if (lifeOver > 2.5 || (lifeOver > 1.2 && wz > HIT_Z + 2)) {
+                if (lifeOver > 2.5 || (lifeOver > 1.2 && rz > HIT_Z + 2)) {
                     this.removeObj(g); this.liveNotes.splice(i, 1);
                 }
                 continue;
             }
 
-            if (wz > HIT_Z - 1.0 && wz < HIT_Z + 1.0) {
+            // animated interactable=false: temporarily unhittable, still no punish
+            const uninteractableNow = ud.fx && ud.fx.interactable && ud.fx.interactable[0] < 0.5;
+
+            if (!uninteractableNow && rz > HIT_Z - 1.0 && rz < HIT_Z + 1.0) {
                 const saber = n.color === 0 ? this.saberLeft : this.saberRight;
                 const wrongSaber = n.color === 0 ? this.saberRight : this.saberLeft;
                 if (saber.distanceTo(ud.wp) < 0.6) {
@@ -908,7 +1183,7 @@ export class Gameplay {
                 }
             }
 
-            if (wz > HIT_Z + 1.3 || (t - n.time) > 0.45) this.miss(g, i);
+            if (rz > HIT_Z + 1.3 || (t - n.time) > 0.45) this.miss(g, i);
         }
     }
 
@@ -920,14 +1195,15 @@ export class Gameplay {
             for (const g of this.liveNotes) {
                 const ud = g.userData;
                 if (ud.decorative || ud.note.color !== want) continue;
-                if (ud.wp.z < HIT_Z - 1.6 || ud.wp.z > HIT_Z + 1.0) continue;
-                const d = Math.hypot(ud.wp.x - saber.group.position.x, ud.wp.y - saber.group.position.y);
+                if (ud.rp.z < HIT_Z - 1.6 || ud.rp.z > HIT_Z + 1.0) continue;
+                // sabers are rig children, so group.position is rig-space like rp
+                const d = Math.hypot(ud.rp.x - saber.group.position.x, ud.rp.y - saber.group.position.y);
                 if (d < bestD) { bestD = d; best = g; }
             }
             if (best) {
                 const k = this.aimAssist * 0.45 * Math.max(0, 1 - bestD / 1.1);
-                saber.group.position.x += (best.userData.wp.x - saber.group.position.x) * k;
-                saber.group.position.y += (best.userData.wp.y - saber.group.position.y) * k;
+                saber.group.position.x += (best.userData.rp.x - saber.group.position.x) * k;
+                saber.group.position.y += (best.userData.rp.y - saber.group.position.y) * k;
             }
         }
     }
@@ -1010,8 +1286,10 @@ export class Gameplay {
             m.scale.setScalar(1);
             if (fx) this.applyNoodleFx(m, ud, fx);
             m.getWorldPosition(ud.wp);
+            ud.rp.copy(ud.wp);
+            this.playerRig.worldToLocal(ud.rp);
 
-            if (!ud.decorative && ud.wp.z > HIT_Z - 0.8 && ud.wp.z < HIT_Z + 0.8) {
+            if (!ud.decorative && ud.rp.z > HIT_Z - 0.8 && ud.rp.z < HIT_Z + 0.8) {
                 const touching = (s) => s.distanceTo(ud.wp) < 0.22 && s.smoothVel.length() > 0.6;
                 if (touching(this.saberLeft) || touching(this.saberRight)) {
                     this.combo = 0;
@@ -1029,7 +1307,7 @@ export class Gameplay {
                 }
             }
             const bLifeOver = (t - b.time) / ud.rt;
-            if (bLifeOver > 2.5 || (bLifeOver > 1.2 && ud.wp.z > HIT_Z + 1.4)) {
+            if (bLifeOver > 2.5 || (bLifeOver > 1.2 && ud.rp.z > HIT_Z + 1.4)) {
                 this.removeObj(m);
                 this.liveBombs.splice(i, 1);
             }
@@ -1047,17 +1325,34 @@ export class Gameplay {
 
             const headZ = this.noteZ(w.time, t, ud.speed);
             if (fx && fx.definitePosition) {
-                m.position.set(fx.definitePosition[0] * UNIT, fx.definitePosition[1] * UNIT, HIT_Z - fx.definitePosition[2] * UNIT);
+                // NE anchors wall definitePosition at the front-bottom-left corner
+                m.position.set(
+                    fx.definitePosition[0] * UNIT + ud.width / 2,
+                    fx.definitePosition[1] * UNIT + ud.height / 2,
+                    HIT_Z - fx.definitePosition[2] * UNIT - ud.length / 2
+                );
             } else {
                 m.position.set(ud.x, ud.y, headZ - ud.length / 2);
             }
             m.scale.setScalar(1);
-            if (fx) {
-                this.applyNoodleFx(m, ud, fx);
-                if (fx.dissolve !== undefined && ud.edgeMat) {
-                    ud.edgeMat.opacity = THREE.MathUtils.clamp(fx.dissolve[0], 0, 1) * 0.7;
+            if (fx) this.applyNoodleFx(m, ud, fx);
+
+            // shader-wall uniforms: animated distortion + Noodle dissolve/color
+            if (ud.mat.isShaderMaterial) {
+                ud.mat.uniforms.uTime.value = this.engine.clockTime;
+                const dis = fx && fx.dissolve !== undefined ? THREE.MathUtils.clamp(fx.dissolve[0], 0, 1) : 1;
+                ud.mat.uniforms.uOpacity.value = dis;
+                if (fx && fx.color) {
+                    ud.mat.uniforms.uColor.value.setRGB(
+                        Math.min(1, fx.color[0]), Math.min(1, fx.color[1]), Math.min(1, fx.color[2]));
                 }
-                if (fx.color && ud.edgeMat) ud.edgeMat.color.copy(ud.mat.color);
+            }
+            if (fx && fx.dissolve !== undefined && ud.edgeMat) {
+                ud.edgeMat.opacity = THREE.MathUtils.clamp(fx.dissolve[0], 0, 1) * 0.7;
+            }
+            if (fx && fx.color && ud.edgeMat) {
+                ud.edgeMat.color.setRGB(
+                    Math.min(1, fx.color[0]), Math.min(1, fx.color[1]), Math.min(1, fx.color[2]));
             }
             m.getWorldPosition(ud.wp);
 
@@ -1220,6 +1515,8 @@ export class Gameplay {
         for (const m of this.liveWalls) this.removeObj(m);
         for (const s of this.slices) if (s.mesh) this.scene.remove(s.mesh);
         for (const p of this.particles) this.scene.remove(p.points);
+        for (const m of (this.envMeshes || [])) if (m.parent) m.parent.remove(m);
+        this.envMeshes = [];
         this.saberLeft.dispose(this.scene);
         this.saberRight.dispose(this.scene);
         this.liveNotes = []; this.liveBombs = []; this.liveWalls = [];

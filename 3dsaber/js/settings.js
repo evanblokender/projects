@@ -10,6 +10,7 @@ const DEFAULTS = {
     bloom: true,
     bloomStrength: 0.5,   // glow intensity
     aimAssist: 0.6,       // 0 = off, 1 = strong magnetism
+    wallDistortion: true, // real-time energy-field shader on walls
     cursorSpeed: 1.0,
 };
 
