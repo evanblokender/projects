@@ -1,30 +1,81 @@
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Beat Saber 3D</title>
+    <title>SABER//3D</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Rajdhani:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="styles.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <script type="importmap">
-        {
-            "imports": {
-                "three": "https://cdnjs.cloudflare.com/ajax/libs/three.js/0.160.1/three.module.min.js",
-                "OrbitControls": "https://cdn.jsdelivr.net/npm/three-orbit-controls@1.0.1/index.min.js",
-                "tween": "https://cdnjs.cloudflare.com/ajax/libs/tween.js/21.0.0/tween.esm.min.js"
-            }
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.160.1/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.1/examples/jsm/"
         }
+    }
     </script>
 </head>
 <body>
     <div id="game-container"></div>
-    <div id="overlay">
-        <div id="controller-status">Connect a controller...</div>
-        <button id="start-button" style="display:none;">Start Game</button>
+
+    <!-- HUD (in-game) -->
+    <div id="hud" class="hidden">
+        <div id="hud-top">
+            <div id="hud-song">
+                <div id="hud-song-name">Song Name</div>
+                <div id="hud-progress"><div id="hud-progress-fill"></div></div>
+            </div>
+        </div>
+        <div id="hud-left">
+            <div id="hud-score">0</div>
+            <div id="hud-acc">100.0%</div>
+            <div id="hud-rank">SS</div>
+        </div>
+        <div id="hud-right">
+            <div id="hud-mult-wrap">
+                <svg id="hud-mult-ring" viewBox="0 0 60 60">
+                    <circle class="ring-bg" cx="30" cy="30" r="26"></circle>
+                    <circle class="ring-fg" id="mult-ring-fg" cx="30" cy="30" r="26"></circle>
+                </svg>
+                <div id="hud-mult">x1</div>
+            </div>
+            <div id="hud-energy"><div id="hud-energy-fill"></div></div>
+        </div>
+        <div id="hud-combo-wrap">
+            <div id="hud-combo">0</div>
+            <div id="hud-combo-label">COMBO</div>
+        </div>
+        <div id="hud-judgement"></div>
+        <div id="hud-nofail-tag" class="hidden">NO FAIL</div>
     </div>
-    <div id="game-info" style="display: none;">
-        <div id="score">Score: 0</div>
-        <div id="combo">Combo: 0</div>
+
+    <!-- Countdown -->
+    <div id="countdown" class="hidden"></div>
+
+    <!-- Menu / UI root -->
+    <div id="ui-root"></div>
+
+    <!-- Gamepad virtual cursor -->
+    <div id="cursor" class="hidden">
+        <svg width="26" height="30" viewBox="0 0 26 30">
+            <path d="M2 1 L2 24 L8 18.5 L12 28 L16.5 26 L12.5 17 L21 16.5 Z"
+                  fill="#fff" stroke="#0b0b16" stroke-width="1.6"/>
+        </svg>
     </div>
-    <script type="module" src="main.js"></script>
-    <audio id="background-music" loop></audio>
+
+    <!-- Controller hint bar -->
+    <div id="hint-bar" class="hidden">
+        <span class="hint"><span class="hint-btn" id="hint-confirm">A</span> Select</span>
+        <span class="hint"><span class="hint-btn" id="hint-back">B</span> Back</span>
+        <span class="hint"><span class="hint-btn">RS</span> Cursor</span>
+        <span class="hint"><span class="hint-btn">LS</span> Scroll</span>
+        <span class="hint"><span class="hint-btn">≡</span> Pause</span>
+    </div>
+
+    <div id="toast-container"></div>
+
+    <script type="module" src="js/main.js"></script>
 </body>
 </html>
